@@ -140,17 +140,6 @@ public class RepositoryImportResource {
       importLogger.startJob( importLoggerStream, uploadDir, level );
       importer.importFile( bundle );
 
-      // Flush the Mondrian cache to show imported data-sources.
-      IMondrianCatalogService mondrianCatalogService =
-          PentahoSystem.get( IMondrianCatalogService.class, "IMondrianCatalogService", PentahoSessionHolder
-              .getSession() );
-      mondrianCatalogService.reInit( PentahoSessionHolder.getSession() );
-
-      // Flush the IOlapService
-      IOlapService olapService =
-          PentahoSystem.get( IOlapService.class, "IOlapService", PentahoSessionHolder.getSession() ); //$NON-NLS-1$
-      olapService.flushAll( PentahoSessionHolder.getSession() );
-
     } catch ( PentahoAccessControlException e ) {
       return Response.serverError().entity( e.toString() ).build();
     } catch ( Exception e ) {

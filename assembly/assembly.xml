@@ -1,6 +1,6 @@
 <!-- In order for this build file to be referenced by name on import into other build files, 
      it's much nicer to have a short name with no spaces. Please don't change it. -->
-<project name="Open_Assembly" basedir="." default="" xmlns:ivy="antlib:org.apache.ivy.ant">
+<project name="Open_Assembly" basedir="." default="" xmlns:ivy="antlib:org.apache.ivy.ant" xmlns:artifact="urn:maven-artifact-ant">
 
   <!-- =================================================================================
        Property Defaults
@@ -61,8 +61,8 @@
   <property name="plugin-samples.visible" value="true" description="Should the plugin-samples be visible" />
 
   <property name="user-console.tmp.dir" value="${basedir}/temp" />
-  <property name="tomcat.major.version" value="6"/>
-  <property name="tomcat.minor.version" value="0.43"/>
+  <property name="tomcat.major.version" value="8"/>
+  <property name="tomcat.minor.version" value="0.23"/>
   <property name="tomcat.version" value="${tomcat.major.version}.${tomcat.minor.version}"/>
   <property name="tomcat.dir" value="${subfloor.resources.dir}/apache-tomcat-${tomcat.version}" description="Directory where tomcat is deployed"/>
   <property name="third-party.dir" value="${subfloor.resources.dir}/third-party" description="Directory where 3rd party tools are included in the platform assemblies" />
@@ -71,11 +71,11 @@
   <property name="kettle-plugins.stage.dir" value="kettle-plugins" />
   <property name="kettle-plugins.dir" value="${stage.dir.solutions}/system/kettle/plugins" />
 
-  <property name="core-bundles.dir" value="${stage.dir.solutions}/system/osgi/core_bundles"/>
-  <property name="fragment-bundles.dir" value="${stage.dir.solutions}/system/osgi/fragment_bundles"/>
-  <property name="bundles.dir" value="${stage.dir.solutions}/system/osgi/bundles"/>
 	<property name="server.assembly.filename" value="server-assembly.properties" />
-	
+
+
+  <path id="maven-ant-tasks.classpath" path="${bin.dir}/maven-ant-tasks.jar" />
+
   <!-- =================================
           target: clean-all
          ================================= -->
@@ -84,9 +84,6 @@
     <delete dir="${solution-archives.dir}" />
     <delete dir="${devlib.dir}" />
     <delete dir="${user-console.tmp.dir}"/>
-    <delete dir="${core-bundles.dir}" />
-    <delete dir="${fragment-bundles.dir}" />
-    <delete dir="${bundles.dir}" />
   </target>
 
 
@@ -158,10 +155,10 @@
           unless="tomcat.available"
           description="Fetches tomcat from apache">
     <mkdir dir="${subfloor.tmp.dir}" />
-    <get src="http://archive.apache.org/dist/tomcat/tomcat-${tomcat.major.version}/v${tomcat.version}/bin/apache-tomcat-${tomcat.version}-windows-x86.zip"
-         dest="${subfloor.tmp.dir}/apache-tomcat-${tomcat.version}-windows-x86.zip"
+    <get src="http://archive.apache.org/dist/tomcat/tomcat-${tomcat.major.version}/v${tomcat.version}/bin/apache-tomcat-${tomcat.version}-windows-x64.zip"
+         dest="${subfloor.tmp.dir}/apache-tomcat-${tomcat.version}-windows-x64.zip"
          usetimestamp="true" />
-	<unzip src="${subfloor.tmp.dir}/apache-tomcat-${tomcat.version}-windows-x86.zip" dest="${tomcat.dir}/.."/>
+	<unzip src="${subfloor.tmp.dir}/apache-tomcat-${tomcat.version}-windows-x64.zip" dest="${tomcat.dir}/.."/>
   </target>
 	
   <!-- =================================
@@ -366,9 +363,6 @@
 
       <!-- Add libraries to the sample data -->
     <antcall target="resolve-sampledata-libs"/>
-    <antcall target="resolve-osgi-core-bundles"/>
-    <antcall target="resolve-osgi-fragment-bundles"/>
-    <antcall target="resolve-osgi-bundles"/>
 
   </target>
 
@@ -448,6 +442,14 @@
     <unzip dest="${stage.dir.solutions}/system" overwrite="true">
       <fileset file="${plugins.dir}/*.zip" />
     </unzip>
+
+    <if>
+      <available file="${stage.dir.solutions}/system/pentaho-karaf-assembly" type="dir" />
+      <then>
+        <move file="${stage.dir.solutions}/system/pentaho-karaf-assembly" tofile="${stage.dir.solutions}/system/karaf" />
+      </then>
+    </if>
+
   </target>
 
   <!-- - - - - - - - - - - - - - - - - -

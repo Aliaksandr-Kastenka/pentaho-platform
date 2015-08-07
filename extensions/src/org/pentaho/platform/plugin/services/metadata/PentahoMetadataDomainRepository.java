@@ -18,6 +18,7 @@
 
 package org.pentaho.platform.plugin.services.metadata;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -31,6 +32,7 @@ import org.pentaho.metadata.repository.IMetadataDomainRepository;
 import org.pentaho.metadata.util.LocalizationUtil;
 import org.pentaho.metadata.util.XmiParser;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
+import org.pentaho.platform.api.repository2.unified.IAclNodeHelper;
 import org.pentaho.platform.api.repository2.unified.IUnifiedRepository;
 import org.pentaho.platform.api.repository2.unified.RepositoryFile;
 import org.pentaho.platform.api.repository2.unified.RepositoryFileAcl;
@@ -40,7 +42,6 @@ import org.pentaho.platform.api.repository2.unified.data.simple.SimpleRepository
 import org.pentaho.platform.plugin.services.messages.Messages;
 import org.pentaho.platform.repository2.unified.RepositoryUtils;
 import org.pentaho.platform.repository2.unified.fileio.RepositoryFileInputStream;
-import org.pentaho.platform.api.repository2.unified.IAclNodeHelper;
 import org.pentaho.platform.repository2.unified.jcr.JcrAclNodeHelper;
 
 import java.io.BufferedReader;
@@ -73,6 +74,7 @@ import java.util.UUID;
  * @author <a href="mailto:dkincade@pentaho.com">David M. Kincade</a>
  */
 public class PentahoMetadataDomainRepository implements IMetadataDomainRepository,
+    IModelAnnotationsAwareMetadataDomainRepositoryImporter,
     IAclAwarePentahoMetadataDomainRepositoryImporter, IPentahoMetadataDomainRepositoryExporter {
   // The logger for this class
   private static final Log logger = LogFactory.getLog( PentahoMetadataDomainRepository.class );
@@ -299,7 +301,8 @@ public class PentahoMetadataDomainRepository implements IMetadataDomainRepositor
 
   @Override
   public boolean hasAccessFor( String domainId ) {
-    return getAclHelper().canAccess( getMetadataRepositoryFile( domainId ), EnumSet.of( RepositoryFilePermission.READ ) );
+    return getAclHelper().canAccess( getMetadataRepositoryFile( domainId ),
+        EnumSet.of( RepositoryFilePermission.READ ) );
   }
 
   /*
@@ -748,5 +751,93 @@ public class PentahoMetadataDomainRepository implements IMetadataDomainRepositor
       metaMapStore.put( repository, metaMap );
     }
     return metaMap;
+  }
+
+  @Override
+  public String loadAnnotationsXml( final String domainId ) {
+
+    if ( StringUtils.isBlank( domainId ) ) {
+      return null; // exit early
+    }
+
+    try {
+      final RepositoryFile domainFile = getMetadataRepositoryFile( domainId );
+      final RepositoryFile annotationFile = getRepository().getFile( resolveAnnotationsFilePath( domainFile ) );
+
+      // Load referenced annotations xml repo file
+      SimpleRepositoryFileData
+          data = getRepository().getDataForRead( annotationFile.getId(), SimpleRepositoryFileData.class );
+      return IOUtils.toString( data.getInputStream() ); // return as String
+    } catch ( Exception e ) {
+      getLogger().warn( "Unable to load annotations xml file for domain: " + domainId );
+    }
+
+    return null;
+  }
+
+  @Override
+  public void storeAnnotationsXml( String domainId, String annotationsXml ) {
+
+    if ( StringUtils.isBlank( domainId ) || StringUtils.isBlank( annotationsXml ) ) {
+      return; // exit early
+    }
+
+    RepositoryFile domainFile = getMetadataRepositoryFile( domainId );
+    RepositoryFile annotationsFile = getAnnotationsXmlFile( domainFile );
+    createOrUpdateAnnotationsXml( domainFile, annotationsFile, annotationsXml );
+  }
+
+  public RepositoryFile getAnnotationsXmlFile( final RepositoryFile domainFile ) {
+
+    if ( domainFile == null ) {
+      return null; // exit early
+    }
+
+    RepositoryFile annotationsFile = null;
+    try {
+      annotationsFile = getRepository().getFile( resolveAnnotationsFilePath( domainFile ) );
+    } catch ( Exception e ) {
+      getLogger().warn( "Unable to find annotations xml file for: " + domainFile.getId() );
+    }
+
+    return annotationsFile;
+  }
+
+  public void createOrUpdateAnnotationsXml( final RepositoryFile domainFile, final RepositoryFile annotationsFile,
+      final String annotationsXml ) {
+
+    if ( domainFile == null ) {
+      return; // exit early
+    }
+
+    try {
+      ByteArrayInputStream in = new ByteArrayInputStream( annotationsXml.getBytes( DEFAULT_ENCODING ) );
+      final SimpleRepositoryFileData data =
+          new SimpleRepositoryFileData( in, DEFAULT_ENCODING, DOMAIN_MIME_TYPE );
+      if ( annotationsFile == null ) {
+        // Generate a filename based on the domainId
+        final String filename = domainFile.getId() + ANNOTATIONS_FILE_ID_POSTFIX;
+
+        // Create the new file
+        getRepository()
+            .createFile( getMetadataDir().getId(), new RepositoryFile.Builder( filename ).build(), data, null );
+      } else {
+        getRepository().updateFile( annotationsFile, data, null );
+      }
+    } catch ( Exception e ) {
+      getLogger().warn( "Unable to save annotations xml", e );
+    }
+  }
+
+  protected String resolveAnnotationsFilePath( final RepositoryFile domainFile ) {
+
+    if ( getMetadataDir() != null && domainFile != null ) {
+      return getMetadataDir().getPath() + "/" + domainFile.getId() + ANNOTATIONS_FILE_ID_POSTFIX;
+    }
+    return null;
+  }
+
+  protected Log getLogger() {
+    return logger;
   }
 }

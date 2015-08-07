@@ -17,42 +17,30 @@
 
 package org.pentaho.platform.web.http.api.resources;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletRequestWrapper;
-import javax.ws.rs.core.MultivaluedMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletRequestWrapper;
+import javax.ws.rs.core.MultivaluedMap;
 
 public class JerseyUtil {
 
   public static HttpServletRequest correctPostRequest( final MultivaluedMap<String, String> formParams,
       HttpServletRequest httpServletRequest ) {
-    final HashMap<String, Object> formParamsHashMap = new HashMap<String, Object>();
+    final HashMap<String, String[]> formParamsHashMap = new HashMap<String, String[]>();
+    formParamsHashMap.putAll( httpServletRequest.getParameterMap() );
 
-    for ( String key : formParams.keySet() ) {
-      Object value = formParams.get( key );
-      if ( value instanceof List ) {
-        Object[] valueArray = ( (List<?>) value ).toArray();
-        formParamsHashMap.put( key, valueArray );
-      } else {
-        formParamsHashMap.put( key, value );
-      }
-    }
-    
-    Map mapParams = httpServletRequest.getParameterMap();
-    for ( Object key : mapParams.keySet() ) {
-      Object value = mapParams.get( key );
-      if ( value instanceof List ) {
-        formParamsHashMap.put( (String) key, ( (List<?>) value ).toArray() );
-      } else {
-        formParamsHashMap.put( (String) key, value );
-      }
+    for ( Entry<String, List<String>> entry : formParams.entrySet() ) {
+      List<String> value = entry.getValue();
+      String[] valueArray = value.toArray( new String[value.size()] );
+      formParamsHashMap.put( entry.getKey(), valueArray );
     }
 
     HttpServletRequestWrapper requestWrapper = new HttpServletRequestWrapper( httpServletRequest ) {
-      @Override
-      public Map<String, Object> getParameterMap() {
+      @Override public Map<String, String[]> getParameterMap() {
         return formParamsHashMap;
       }
 

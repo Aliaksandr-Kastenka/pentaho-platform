@@ -13,13 +13,16 @@
 
 package org.pentaho.platform.repository.solution.filebased;
 
-import org.apache.commons.vfs.FileName;
-import org.apache.commons.vfs.FileObject;
-import org.apache.commons.vfs.FileSystemConfigBuilder;
-import org.apache.commons.vfs.FileSystemException;
-import org.apache.commons.vfs.FileSystemOptions;
-import org.apache.commons.vfs.provider.FileProvider;
+import org.apache.commons.vfs2.FileName;
+import org.apache.commons.vfs2.FileObject;
+import org.apache.commons.vfs2.FileSystemConfigBuilder;
+import org.apache.commons.vfs2.FileSystemException;
+import org.apache.commons.vfs2.FileSystemOptions;
+import org.apache.commons.vfs2.provider.FileProvider;
 import org.pentaho.platform.api.repository2.unified.RepositoryFile;
+import org.pentaho.platform.api.repository2.unified.MondrianSchemaAnnotator;
+import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
+import org.pentaho.platform.engine.core.system.PentahoSystem;
 
 import java.util.Collection;
 
@@ -37,8 +40,22 @@ public class MondrianVfs implements FileProvider {
   public FileObject findFile( FileObject arg0, String catalog, FileSystemOptions arg2 ) throws FileSystemException {
     // Resolves mondrian:/<catalog> to /etc/mondrian/<catalog>/schema.xml
     catalog = catalog.substring( catalog.indexOf( ":" ) + 1 ); // removes mondrian:
+    FileObject schemaFile = getCatalogFileObject( catalog, "schema.xml" );
+    FileObject annotationsFile = getCatalogFileObject( catalog, "annotations.xml" );
+    MondrianSchemaAnnotator annotator = getAnnotator();
+    if ( annotationsFile.exists() && annotator != null ) {
+      return new MondrianFileObject( schemaFile, annotationsFile, annotator );
+    }
+    return schemaFile;
+  }
+
+  MondrianSchemaAnnotator getAnnotator() {
+    return PentahoSystem.get( MondrianSchemaAnnotator.class, "inlineModeling", PentahoSessionHolder.getSession() );
+  }
+
+  FileObject getCatalogFileObject( final String catalog, final String fileName ) {
     return new SolutionRepositoryVfsFileObject( RepositoryFile.SEPARATOR + "etc" + RepositoryFile.SEPARATOR
-        + "mondrian" + catalog + RepositoryFile.SEPARATOR + "schema.xml" );
+      + "mondrian" + catalog + RepositoryFile.SEPARATOR + fileName );
   }
 
   public Collection getCapabilities() {

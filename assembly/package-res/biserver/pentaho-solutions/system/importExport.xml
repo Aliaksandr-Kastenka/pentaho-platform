@@ -22,6 +22,26 @@
 		</pen:publish>
 	</bean>
 
+	<bean id="PDITransformationStreamConverter"
+		class="com.pentaho.repository.importexport.StreamToTransNodeConverter">
+		<constructor-arg ref="unifiedRepository"/>
+		<pen:publish as-type="INTERFACES">
+			<pen:attributes>
+				<pen:attr key="name" value="PDITransformationStreamConverter" />
+			</pen:attributes>
+		</pen:publish>
+	</bean>
+
+	<bean id="PDIJobStreamConverter"
+		class="com.pentaho.repository.importexport.StreamToJobNodeConverter">
+			<constructor-arg ref="unifiedRepository"/>
+		<pen:publish as-type="INTERFACES">
+			<pen:attributes>
+				<pen:attr key="name" value="PDIJobStreamConverter" />
+			</pen:attributes>
+		</pen:publish>
+	</bean>
+	
 	<bean id="IRepositoryContentConverterHandler"
 		class="org.pentaho.platform.plugin.services.importer.DefaultRepositoryContentConverterHandler" scope="singleton">
 		<constructor-arg>
@@ -166,6 +186,24 @@
 					<property name="defaultAclHandler" ref="defaultAclHandler" />
 				</bean>
 				
+				<bean class="com.pentaho.repository.importexport.PDIImportFileHandler">
+					<constructor-arg>
+						<bean factory-bean="MimeTypeListFactory" factory-method="createMimeTypeList" >
+							<constructor-arg value="com.pentaho.repository.importexport.PDIImportFileHandler" /> 
+						</bean>
+					</constructor-arg>
+					<property name="repository" ref="unifiedRepository" />
+					<property name="defaultAclHandler" ref="defaultAclHandler" />
+				</bean>
+
+				<bean class="org.pentaho.platform.plugin.services.importer.MetaStoreImportHandler">
+					<constructor-arg>
+						<bean factory-bean="MimeTypeListFactory" factory-method="createMimeTypeList" >
+							<constructor-arg value="org.pentaho.platform.plugin.services.importer.MetaStoreImportHandler"/>
+						</bean>
+					</constructor-arg>
+				</bean>
+
 			</util:list>
 		</constructor-arg>
 	</bean>
@@ -174,5 +212,17 @@
 		<pen:publish as-type="INTERFACES">
 		</pen:publish>
 	</bean>
+	
+	<bean class="org.pentaho.platform.config.SolutionPropertiesFileConfiguration">
+		<constructor-arg value="server"/>
+		<constructor-arg value="server.properties"/>
+		<pen:publish as-type="INTERFACES"/>
+	</bean>
+
+  <bean class="org.pentaho.platform.config.SolutionPropertiesFileConfiguration">
+    <constructor-arg value="java-system-properties"/>
+    <constructor-arg value="java-system-properties.properties"/>
+    <pen:publish as-type="INTERFACES"/>
+  </bean>
 </beans>
 

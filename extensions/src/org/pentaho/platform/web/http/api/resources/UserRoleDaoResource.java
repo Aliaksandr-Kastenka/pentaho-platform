@@ -17,55 +17,59 @@
 
 package org.pentaho.platform.web.http.api.resources;
 
-import com.sun.jersey.api.NotFoundException;
+import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
+import static javax.ws.rs.core.MediaType.APPLICATION_XML;
+import static javax.ws.rs.core.MediaType.WILDCARD;
+import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.StringTokenizer;
+
+import javax.ws.rs.Consumes;
+import javax.ws.rs.GET;
+import javax.ws.rs.PUT;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Response;
+
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
+import org.codehaus.enunciate.jaxrs.ResponseCode;
+import org.codehaus.enunciate.jaxrs.StatusCodes;
 import org.pentaho.platform.api.engine.IAuthorizationPolicy;
 import org.pentaho.platform.api.engine.IPentahoSession;
 import org.pentaho.platform.api.engine.security.userroledao.IPentahoRole;
 import org.pentaho.platform.api.engine.security.userroledao.IPentahoUser;
 import org.pentaho.platform.api.engine.security.userroledao.IUserRoleDao;
+import org.pentaho.platform.api.engine.security.userroledao.UncategorizedUserRoleDaoException;
 import org.pentaho.platform.api.mt.ITenant;
 import org.pentaho.platform.api.mt.ITenantManager;
 import org.pentaho.platform.core.mt.Tenant;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.security.policy.rolebased.IRoleAuthorizationPolicyRoleBindingDao;
-import org.pentaho.platform.security.policy.rolebased.RoleBindingStruct;
 import org.pentaho.platform.security.policy.rolebased.actions.AdministerSecurityAction;
 import org.pentaho.platform.security.policy.rolebased.actions.RepositoryCreateAction;
 import org.pentaho.platform.security.policy.rolebased.actions.RepositoryReadAction;
+import org.pentaho.platform.web.http.api.resources.services.UserRoleDaoService;
+import org.pentaho.platform.web.http.api.resources.services.UserRoleDaoService.ValidationFailedException;
 
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.WebApplicationException;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.PUT;
-
-import javax.ws.rs.core.Response;
-import java.io.UnsupportedEncodingException;
-import java.net.URLDecoder;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.StringTokenizer;
-
-import static javax.ws.rs.core.MediaType.*;
-import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
+import com.sun.jersey.api.NotFoundException;
 
 /**
- * UserRoleDao manage pentaho security user and roles in the platform.
+ * UserRoleDao manages Pentaho Security user and roles in the BA platform.
  */
 @Path ( "/userroledao/" )
 public class UserRoleDaoResource extends AbstractJaxRSResource {
 
   private IRoleAuthorizationPolicyRoleBindingDao roleBindingDao = null;
   private ITenantManager tenantManager = null;
+  private final UserRoleDaoService userRoleDaoService;
   private ArrayList<String> systemRoles;
   private String adminRole;
 
@@ -76,12 +80,16 @@ public class UserRoleDaoResource extends AbstractJaxRSResource {
   public UserRoleDaoResource() {
     this( PentahoSystem.get( IRoleAuthorizationPolicyRoleBindingDao.class ), PentahoSystem.get( ITenantManager.class ),
         PentahoSystem.get( ArrayList.class, "singleTenantSystemAuthorities", PentahoSessionHolder.getSession() ),
-        PentahoSystem.get( String.class, "singleTenantAdminAuthorityName", PentahoSessionHolder.getSession() ) );
+        PentahoSystem.get( String.class, "singleTenantAdminAuthorityName", PentahoSessionHolder.getSession() ), new UserRoleDaoService() );
   }
 
   public UserRoleDaoResource( final IRoleAuthorizationPolicyRoleBindingDao roleBindingDao,
                               final ITenantManager tenantMgr, final ArrayList<String> systemRoles, final String adminRole ) {
+    this( roleBindingDao, tenantMgr, systemRoles, adminRole, new UserRoleDaoService() );
+  }
 
+  public UserRoleDaoResource( final IRoleAuthorizationPolicyRoleBindingDao roleBindingDao,
+                              final ITenantManager tenantMgr, final ArrayList<String> systemRoles, final String adminRole, UserRoleDaoService  service ) {
     if ( roleBindingDao == null ) {
       throw new IllegalArgumentException();
     }
@@ -90,172 +98,203 @@ public class UserRoleDaoResource extends AbstractJaxRSResource {
     this.tenantManager = tenantMgr;
     this.systemRoles = systemRoles;
     this.adminRole = adminRole;
-
+    this.userRoleDaoService = service;
   }
 
   /**
-   * Returns the list of users in the platform's repository
+   * Returns the list of users in the platform's repository.
    *
-   * @return list of users in the platform
-   * @throws Exception
+   * <p><b>Example Request:</b><br />
+   * GET pentaho/api/userroledao/users
+   * </p>
+   *
+   * @return List of users in the platform.
+   *
+   * <p><b>Example Response:</b>
+   * <pre function="syntax.xml">
+   *  <userList>
+   *    <users>suzy</users>
+   *    <users>pat</users>
+   *    <users>tiffany</users>
+   *    <users>admin</users>
+   *  </userList>
+   * </pre>
    */
   @GET
   @Path ( "/users" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
-  @Facet( name = "Unsupported" )
-  public UserListWrapper getUsers() throws Exception {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        return new UserListWrapper( roleDao.getUsers() );
-      } catch ( Throwable t ) {
-        throw new WebApplicationException( t );
-      }
-    } else {
-      throw new WebApplicationException( new Throwable() );
+  @StatusCodes( {
+      @ResponseCode ( code = 200, condition = "Successfully returned the list of users." ),
+      @ResponseCode ( code = 500, condition = "An error occurred in the platform while trying to access the list of users." )
+  } )
+  public UserListWrapper getUsers() throws WebApplicationException {
+    try {
+      return userRoleDaoService.getUsers();
+    } catch ( Exception e ) {
+      logger.warn( e.getMessage(), e );
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
     }
   }
 
   /**
-   * Returns the list of roles in the platform's repository
+   * Gets the roles for the given user.
    *
-   * @return list of roles in the platform
-   * @throws Exception
-   */
-  @GET
-  @Path ( "/roles" )
-  @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
-  @Facet ( name = "Unsupported" )
-  public RoleListWrapper getRoles() throws Exception {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        return new RoleListWrapper( roleDao.getRoles() );
-      } catch ( Throwable t ) {
-        throw new WebApplicationException( t );
-      }
-    } else {
-      throw new WebApplicationException( new Throwable() );
-    }
-  }
-
-  /**
-   * Retrieves a selected user's roles
+   * <p><b>Example Request:</b><br />
+   *    GET pentaho/api/userroledao/userRoles?userName=suzy
+   * </p>
    *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param userName   (user name)
-   * @return list of roles fir the selected user
-   * @throws Exception
+   * @param user The username to get the roles for.
+   *
+   * @return List containing the roles for the given user.
+   *
+   * <p><b>Example Response:</b></p>
+   * <pre function="syntax.xml">
+   *     &lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;yes&quot;?&gt;&lt;roleList&gt;&lt;roles&gt;Power User&lt;/roles&gt;&lt;/roleList&gt;
+   * </pre>
    */
   @GET
   @Path ( "/userRoles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
-  @Facet ( name = "Unsupported" )
-  public RoleListWrapper getUserRoles( @QueryParam ( "tenant" ) String tenantPath,
-                                       @QueryParam ( "userName" ) String userName ) throws Exception {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        return new RoleListWrapper( roleDao.getUserRoles( getTenant( tenantPath ), userName ) );
-      } catch ( Throwable t ) {
-        throw new WebApplicationException( t );
-      }
-    } else {
-      throw new WebApplicationException( new Throwable() );
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of roles." ),
+    @ResponseCode ( code = 500, condition = "Invalid user parameter." )
+  } )
+  public RoleListWrapper getRolesForUser( @QueryParam( "userName" ) String user ) throws Exception {
+    try {
+      return userRoleDaoService.getRolesForUser( user );
+    } catch ( UncategorizedUserRoleDaoException t ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
     }
   }
 
   /**
-   * Retrieves list of users for the selected role
+   * Returns the list of roles in the platform's repository.
    *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param roleName   (role name)
-   * @return list of users for the selected role
-   * @throws Exception
+   * <p><b>Example Request:</b><br />
+   *    GET pentaho/api/userroledao/roles
+   * </p>
+   *
+   * @return List of roles in the platform.
+   *
+   * <p><b>Example Response:</b></p>
+   * <pre function="syntax.xml">
+   *   &lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;yes&quot;?&gt;&lt;roleList&gt;&lt;roles&gt;Administrator&lt;/roles&gt;&lt;roles&gt;Power User&lt;/roles&gt;&lt;roles&gt;Report Author&lt;/roles&gt;&lt;roles&gt;Business Analyst&lt;/roles&gt;&lt;/roleList&gt;&gt;
+   * </pre>
+   */
+  @GET
+  @Path( "/roles" )
+  @Produces( { APPLICATION_XML, APPLICATION_JSON } )
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of roles." ),
+    @ResponseCode ( code = 500, condition = "The system was not able to return the list of roles." )
+  } )
+  public RoleListWrapper getRoles() throws Exception {
+    try {
+      return userRoleDaoService.getRoles();
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
+    }
+  }
+
+  /**
+   * Retrieves list of users for the selected role. The role must be a valid role in the system. Must have administrative privileges to access this.
+   *
+   * <p><b>Example Request:</b><br />
+   *   GET pentaho/api/userroledao/roleMembers?roleName=Power%20User
+   * </p>
+   *
+   * @param roleName The role name to get the list of users associated with it.
+   *
+   * @return List of users for the selected role.
+   *
+   *<p><b>Example Response:</b></p>
+   * <pre function="syntax.xml">
+   *   &lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot; standalone=&quot;yes&quot;?&gt;&lt;userList&gt;&lt;users&gt;suzy&lt;/users&gt;&lt;users&gt;admin&lt;/users&gt;&lt;/userList&gt;
+   * </pre>
    */
   @GET
   @Path ( "/roleMembers" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
-  @Facet ( name = "Unsupported" )
-  public UserListWrapper getRoleMembers( @QueryParam ( "tenant" ) String tenantPath,
-                                         @QueryParam ( "roleName" ) String roleName ) throws Exception {
-    IUserRoleDao roleDao =
-        PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-    return new UserListWrapper( roleDao.getRoleMembers( getTenant( tenantPath ), roleName ) );
-  }
-
-  /**
-   * Associates selected role(s) to a user
-   *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param userName   (username)
-   * @param roleNames  (tab (\t) separated list of role names)
-   * @return
-   */
-  @PUT
-  @Path ( "/assignRoleToUser" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response assignRoleToUser( @QueryParam ( "tenant" ) String tenantPath,
-                                    @QueryParam ( "userName" ) String userName, @QueryParam ( "roleNames" ) String roleNames ) {
-    if ( canAdminister() ) {
-      IUserRoleDao roleDao =
-          PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-      StringTokenizer tokenizer = new StringTokenizer( roleNames, "\t" );
-      Set<String> assignedRoles = new HashSet<String>();
-      for ( IPentahoRole pentahoRole : roleDao.getUserRoles( getTenant( tenantPath ), userName ) ) {
-        assignedRoles.add( pentahoRole.getName() );
-      }
-      while ( tokenizer.hasMoreTokens() ) {
-        assignedRoles.add( tokenizer.nextToken() );
-      }
-      try {
-        roleDao.setUserRoles( getTenant( tenantPath ), userName, assignedRoles.toArray( new String[0] ) );
-      } catch ( Throwable th ) {
-        return processErrorResponse( th.getLocalizedMessage() );
-      }
-      return Response.ok().build();
-    } else {
-      return Response.status( UNAUTHORIZED ).build();
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Users." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method." ),
+    @ResponseCode ( code = 500, condition = "The system was not able to return the list of users." )
+  } )
+  public UserListWrapper getRoleMembers( @QueryParam ( "roleName" ) String roleName ) throws Exception {
+    try {
+      return userRoleDaoService.getRoleMembers( roleName );
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
   }
 
   /**
-   * Remove selected roles(s) from a selected user
+   * Appends existing roles to an existing user passed to the system through query parameters.
+   * This endpoint is only available to users with administrative privileges.
+   * <p/>
+   * <p><b>Example Request:</b><br /> PUT  pentaho/api/userroledao/assignRoleToUser?userName=admin&roleNames=power%20user%09cto%09
+   * </p>
    *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param userName   (username)
-   * @param roleNames  (tab (\t) separated list of role names)
-   * @return
+   * @param userName  The username that the list of roles will be appended to
+   * @param roleNames Rolenames must be associated to existing roles in a tab (\t) separated list
+   * @return Response object containing the status code of the operation
    */
   @PUT
-  @Path ( "/removeRoleFromUser" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response removeRoleFromUser( @QueryParam ( "tenant" ) String tenantPath,
-                                      @QueryParam ( "userName" ) String userName, @QueryParam ( "roleNames" ) String roleNames ) {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        StringTokenizer tokenizer = new StringTokenizer( roleNames, "\t" );
-        Set<String> assignedRoles = new HashSet<String>();
-        for ( IPentahoRole pentahoRole : roleDao.getUserRoles( getTenant( tenantPath ), userName ) ) {
-          assignedRoles.add( pentahoRole.getName() );
-        }
-        while ( tokenizer.hasMoreTokens() ) {
-          assignedRoles.remove( tokenizer.nextToken() );
-        }
-        roleDao.setUserRoles( getTenant( tenantPath ), userName, assignedRoles.toArray( new String[0] ) );
-        return Response.ok().build();
-      } catch ( Throwable th ) {
-        return processErrorResponse( th.getLocalizedMessage() );
-      }
-    } else {
-      return Response.status( UNAUTHORIZED ).build();
+  @Path( "/assignRoleToUser" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully append the roles to the user." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method" ),
+    @ResponseCode ( code = 500, condition = "Internal server error prevented the system from properly retrieving either the user or roles." )
+  } )
+  public Response assignRolesToUser( @QueryParam( "userName" ) String userName,
+                                     @QueryParam( "roleNames" ) String roleNames ) {
+    try {
+      userRoleDaoService.assignRolesToUser( userName, roleNames );
+      return Response.ok().build();
+    } catch ( org.pentaho.platform.api.engine.security.userroledao.NotFoundException e ) {
+      throw new WebApplicationException( Response.Status.NOT_FOUND );
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
+    }
+  }
+
+  /**
+   * Removes selected roles from an existing user passed to the system through query parameters.
+   * This endpoint is only available to users with administrative privileges.
+   *
+   * <p><b>Example Request:</b><br />
+   *  PUT  pentaho/api/userroledao/removeRoleFromUser?userName=admin&roleNames=Business%20User%09Power%20User%09
+   * </p>
+   *
+   * @param userName   The username that the list of roles will be removed from.
+   * @param roleNames  Rolenames must be associated to existing roles in a tab (\t) separated list.
+   *
+   * @return Response object containing the status code of the operation.
+   */
+  @PUT
+  @Path( "/removeRoleFromUser" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully removed the roles from the user." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method." ),
+    @ResponseCode ( code = 500, condition = "Internal server error prevented the system from properly retrieving either the user or roles." )
+  } )
+  public Response removeRolesFromUser( @QueryParam( "userName" ) String userName,
+                                       @QueryParam( "roleNames" ) String roleNames ) {
+    try {
+      userRoleDaoService.removeRolesFromUser( userName, roleNames );
+      return Response.ok().build();
+    } catch ( org.pentaho.platform.api.engine.security.userroledao.NotFoundException e ) {
+      throw new WebApplicationException( Response.Status.NOT_FOUND );
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
   }
 
@@ -335,7 +374,7 @@ public class UserRoleDaoResource extends AbstractJaxRSResource {
         assignedUserNames.add( tokenizer.nextToken() );
       }
       try {
-        roleDao.setRoleMembers( getTenant( tenantPath ), roleName, assignedUserNames.toArray( new String[0] ) );
+        roleDao.setRoleMembers( getTenant( tenantPath ), roleName, assignedUserNames.toArray( new String[ 0 ] ) );
         return Response.ok().build();
       } catch ( Throwable th ) {
         return processErrorResponse( th.getLocalizedMessage() );
@@ -432,208 +471,358 @@ public class UserRoleDaoResource extends AbstractJaxRSResource {
   }
 
   /**
-   * Create a new user with provided information.
+   * Creates new user with the specified user name and password, this request is encapsulated inside a user object that has userName and password values.
+   * The user is created without any assigned roles, roles must be assigned separately. This endpoint is only accessible to an administrative user.
    *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param user       (user information <code> User </code>)
-   * @return
+   * <p>
+   * <b>Example Request:</b><br />
+   * PUT pentaho/api/userroledao/createUser
+   * <user>
+   *   <userName>Joe</userName>
+   *   <password>password</password>
+   * </user>
+   * </p>
+   *
+   * @param user
+   *          A user is an object the system uses to pass along a userName and password in the format:
+   *          <user>
+   *            <userName>Joe</userName>
+   *            <password>password</password>
+   *          </user>
+   * 
+   * @return Response object containing the status code of the operation
    */
   @PUT
-  @Path ( "/createUser" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response createUser( @QueryParam ( "tenant" ) String tenantPath, User user ) {
-    IUserRoleDao roleDao =
-        PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-    String userName = user.getUserName();
-    String password = user.getPassword();
+  @Path( "/createUser" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes( { 
+    @ResponseCode( code = 200, condition = "Successfully created new user." ), 
+    @ResponseCode( code = 400, condition = "Provided data has invalid format." ), 
+    @ResponseCode( code = 403, condition = "A non administrative user is trying to access this endpoint." ), 
+    @ResponseCode( code = 412, condition = "Unable to create user." )
+  } )
+  public Response createUser( User user ) {
     try {
-      userName = URLDecoder.decode( userName.replace( "+", "%2B" ), "UTF-8" );
-    } catch ( UnsupportedEncodingException e ) {
-      userName = user.getUserName();
-      logger.warn( e.getMessage(), e );
+      userRoleDaoService.createUser( user );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
+    } catch ( UserRoleDaoService.ValidationFailedException e ) {
+      throw new WebApplicationException( Response.Status.BAD_REQUEST );
+    } catch ( Exception e ) {
+      // TODO: INTERNAL_SERVER_ERROR(500) returns (FORBIDDEN)403 error instead for unknown reason. To avoid it use
+      // PRECONDITION_FAILED
+      throw new WebApplicationException( Response.Status.PRECONDITION_FAILED );
     }
-    try {
-      password = URLDecoder.decode( password.replace( "+", "%2B" ), "UTF-8" );
-    } catch ( UnsupportedEncodingException e ) {
-      password = user.getPassword();
-      logger.warn( e.getMessage(), e );
-    }
-    roleDao.createUser( getTenant( tenantPath ), userName, password, "", new String[0] );
     return Response.ok().build();
   }
 
   /**
-   * Create a new role with the provided information
+   * Allows a user or any user that knows a users name and current password to change that users password. The information is encapsulated in a ChangeUserPassword object that contains the fields: userName, newPassword, oldPassword.
    *
-   * @param tenantPath (tenant path where the user exist, null of empty string assumes default tenant)
-   * @param roleName   (name of the new role)
-   * @return
+   * <p>
+   * <b>Example Request:</b><br />
+   * PUT pentaho/api/userroledao/user
+   *
+   * <ChangePasswordUser>
+   *   <userName>Joe</userName>
+   *   <newPassword>newPassword</newPassword>
+   *   <oldPassword>oldPassword</oldPassword>
+   * </ChangePasswordUser>
+   * </p>
+   * 
+   * @param ChangePasswordUser Encapsulates the fields required for a user to update their password. The object requires the name of the user whose password is being changed, the old password, and the new password.
+   *                           A ChangePasswordUser object can be constructed as follows:
+   * <ChangePasswordUser>
+   *   <userName>Joe</userName>
+   *   <newPassword>newPassword</newPassword>
+   *   <oldPassword>oldPassword</oldPassword>
+   * </ChangePasswordUser>
+   * 
+   * @return Response object containing the status code of the operation
    */
   @PUT
-  @Path ( "/createRole" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response createRole( @QueryParam ( "tenant" ) String tenantPath, @QueryParam ( "roleName" ) String roleName ) {
-    IUserRoleDao roleDao =
-        PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-    roleDao.createRole( getTenant( tenantPath ), roleName, "", new String[0] );
+  @Path( "/user" )
+  @StatusCodes( { 
+    @ResponseCode( code = 200, condition = "Successfully changed password." ), 
+    @ResponseCode( code = 400, condition = "Provided data has invalid format." ), 
+    @ResponseCode( code = 403, condition = "Provided user name or password is wrong." ), 
+    @ResponseCode( code = 412, condition = "An error occurred in the platform." )
+  } )
+  public Response changeUserPassword( ChangePasswordUser user ) {
+    try {
+      userRoleDaoService.changeUserPassword( user.getUserName(), user.getNewPassword(), user.getOldPassword() );
+    } catch ( ValidationFailedException e ) {
+      throw new WebApplicationException( Response.Status.BAD_REQUEST );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
+    } catch ( Exception e ) {
+      // TODO: INTERNAL_SERVER_ERROR(500) returns (FORBIDDEN)403 error instead for unknown reason. I used
+      // PRECONDITION_FAILED
+      throw new WebApplicationException( Response.Status.PRECONDITION_FAILED );
+    }
     return Response.ok().build();
   }
 
   /**
-   * Delete role(s) from the platform
+   * Creates a new role that that does not have any permissions assigned to it. Permissions must be assigned after creating the role.
+   * This endpoint is only usable by an administrative user.
+   * 
+   * <p>
+   * <b>Example Request:</b><br />
+   * PUT pentaho/api/userroledao/createRole?roleName=rName
+   * </p>
    *
-   * @param roleNames (list of tab (\t) separated role names)
-   * @return
+   * @param roleName
+   *          Name of the new role to create in the system.
+   * @return Response containing the result of the operation.
    */
   @PUT
-  @Path ( "/deleteRoles" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response deleteRole( @QueryParam ( "roleNames" ) String roleNames ) {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        StringTokenizer tokenizer = new StringTokenizer( roleNames, "\t" );
-        while ( tokenizer.hasMoreTokens() ) {
-          IPentahoRole role = roleDao.getRole( null, tokenizer.nextToken() );
-          if ( role != null ) {
-            roleDao.deleteRole( role );
-          }
-        }
-      } catch ( Throwable th ) {
-        return processErrorResponse( th.getLocalizedMessage() );
-      }
+  @Path( "/createRole" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes( { 
+    @ResponseCode( code = 200, condition = "Successfully created new role." ), 
+    @ResponseCode( code = 400, condition = "Provided data has invalid format." ), 
+    @ResponseCode( code = 403, condition = "A non administrative user is trying to access this endpoint." ), 
+    @ResponseCode( code = 412, condition = "Unable to create role objects." ) 
+  } )
+  public Response createRole( @QueryParam( "roleName" ) String roleName) {
+    try {
+      userRoleDaoService.createRole( roleName );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
+    } catch ( UserRoleDaoService.ValidationFailedException e ) {
+      throw new WebApplicationException( Response.Status.BAD_REQUEST );
+    } catch ( Exception e ) {
+      // TODO: INTERNAL_SERVER_ERROR(500) returns (FORBIDDEN)403 error instead for unknown reason. To avoid it use
+      // PRECONDITION_FAILED
+      throw new WebApplicationException( Response.Status.PRECONDITION_FAILED );
+    }
+    return Response.ok().build();
+  }
+
+  /**
+   * Delete role(s) from the platform. Must have administrative privileges.
+   *
+   * <p><b>Example Request:</b><br />
+   *  PUT  pentaho/api/userroledao/deleteRoles?roleNames=role1%09
+   * </p>
+   *
+   * @param roleNames List of tab (\t) separated role names, must be valid roles.
+   * @return Response containing the result of the operation.
+   */
+  @PUT
+  @Path( "/deleteRoles" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes( {
+    @ResponseCode( code = 200, condition = "Successfully deleted the list of roles." ),
+    @ResponseCode( code = 403, condition = "Only users with administrative privileges can access this method." ),
+    @ResponseCode( code = 500, condition = "The system was unable to delete the roles passed in." )
+  } )
+  public Response deleteRoles( @QueryParam( "roleNames" ) String roleNames ) {
+    try {
+      userRoleDaoService.deleteRoles( roleNames );
       return Response.ok().build();
-    } else {
-      return Response.status( UNAUTHORIZED ).build();
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
     }
   }
 
   /**
-   * Delete user(s) from the platform
+   * Delete user(s) from the platform using a query parameter that takes a list of tab separated user names.
    *
-   * @param userNames (list of tab (\t) separated user names)
-   * @return
+   *<p><b>Example Request:</b><br />
+   *  PUT pentaho/api/userroledao/deleteUsers?userNames=user1%09user2%09
+   * </p>
+   *
+   * @param userNames (List of tab (\t) separated user names)
+   *
+   * @return Response object containing the status code of the operation
    */
   @PUT
   @Path ( "/deleteUsers" )
   @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
-  public Response deleteUser( @QueryParam ( "userNames" ) String userNames ) {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        StringTokenizer tokenizer = new StringTokenizer( userNames, "\t" );
-        while ( tokenizer.hasMoreTokens() ) {
-          IPentahoUser user = roleDao.getUser( null, tokenizer.nextToken() );
-          if ( user != null ) {
-            roleDao.deleteUser( user );
-          }
-        }
-      } catch ( Throwable th ) {
-        return processErrorResponse( th.getLocalizedMessage() );
-      }
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully deleted the list of users." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method" ),
+    @ResponseCode ( code = 500, condition = "Internal server error prevented the system from properly retrieving either the user or roles." )
+  } )
+  public Response deleteUsers( @QueryParam( "userNames" ) String userNames ) {
+    try {
+      userRoleDaoService.deleteUsers( userNames );
       return Response.ok().build();
-    } else {
-      return Response.status( UNAUTHORIZED ).build();
+    } catch ( org.pentaho.platform.api.engine.security.userroledao.NotFoundException e ) {
+      throw new WebApplicationException( Response.Status.NOT_FOUND );
+    } catch ( UncategorizedUserRoleDaoException e ) {
+      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
   }
 
   /**
-   * Update the password of a selected user
+   * This is an administrative tool, that allows an administator the ability to change any users password by passing in the username and the new password.
+   * The fields are encapsulated in a user object containing a userName and password.
    *
-   * @param user (user information <code> User </code>)
-   * @return
+   * <p>
+   * <b>Example Request:</b><br />
+   * PUT pentaho/api/userroledao/updatePassword
+   * <user>
+   *   <userName>Joe</userName>
+   *   <password>password</password>
+   * </user>
+   * </p>
+   *
+   * @param user
+   *          A user is an object the system uses to pass along a userName and password in the format:
+   *          <user>
+   *            <userName>Joe</userName>
+   *            <password>password</password>
+   *          </user>
+   * @return response object containing the status code of the operation
    */
   @PUT
-  @Path ( "/updatePassword" )
-  @Consumes ( { WILDCARD } )
-  @Facet ( name = "Unsupported" )
+  @Path( "/updatePassword" )
+  @Consumes( { WILDCARD } )
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully deleted the list of users." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method" ),
+    @ResponseCode ( code = 500, condition = "Internal server error prevented the system from properly retrieving either the user or roles." )
+  } )
   public Response updatePassword( User user ) {
-    if ( canAdminister() ) {
-      try {
-        IUserRoleDao roleDao =
-            PentahoSystem.get( IUserRoleDao.class, "userRoleDaoProxy", PentahoSessionHolder.getSession() );
-        String userName = user.getUserName();
-        String password = user.getPassword();
-        try {
-          userName = URLDecoder.decode( userName.replace( "+", "%2B" ), "UTF-8" );
-        } catch ( UnsupportedEncodingException e ) {
-          userName = user.getUserName();
-          logger.warn( e.getMessage(), e );
-        }
-        try {
-          password = URLDecoder.decode( password.replace( "+", "%2B" ), "UTF-8" );
-        } catch ( UnsupportedEncodingException e ) {
-          password = user.getPassword();
-          logger.warn( e.getMessage(), e );
-        }
-        IPentahoUser puser = roleDao.getUser( null, userName );
-        if ( puser != null ) {
-          roleDao.setPassword( null, userName, password );
-        }
-        return Response.ok().build();
-      } catch ( Throwable t ) {
-        throw new WebApplicationException( t );
-      }
-    } else {
-      return Response.status( UNAUTHORIZED ).build();
+    try {
+      userRoleDaoService.updatePassword( user );
+      return Response.ok().build();
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
   }
 
   /**
-   * Retrieve the list of logical roles in the platform
+   * Retrieves the list of roles in the platform and the mapping for operation permissions, along with a list of operation permissions.
+   * The logical role name mapping is determined by the locale. If the locale is empty, the system will use the default locale of "en".
    *
-   * @param locale (locale)
-   * @return
+   * <p><b>Example Request:</b><br />
+   *  GET  pentaho/api/userroledao/logicalRoleMap?locale=en
+   * </p>
+   *
+   * @param locale The locale paramter is optional and determines the localized role name for a physical permission in the system roles map.
+   * @return A role mapping for the current system. Each assignment contains the immutable flag and
+   * roles for immutable assignments cannot be edited. This is useful for roles such as administrator, who should never lose the administrative priviledge.
+   * Logical roles in the assignment are the physical permissions currently mapped to the role. The role name is the name of the role that can be assigned to users.
+   * The system roles map also includes a list of all physical permissions in the system along with their localized role name. The localized role name is based on the local passed into the call, defaulting to "en".
+   * These are the physical permissions that can be used to create roles.
+   *
+   *<p><b>Example Response:</b></p>
+   * <pre function="syntax.xml">
+   *  &lt;systemRolesMap&gt;
+   *  &lt;assignments&gt;
+   *  &lt;immutable&gt;false&lt;/immutable&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.scheduler.manage&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.security.publish&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.repository.create&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.repository.execute&lt;/logicalRoles&gt;
+   *  &lt;roleName&gt;Power User&lt;/roleName&gt;
+   *  &lt;/assignments&gt;
+   *  &lt;assignments&gt;
+   *  &lt;immutable&gt;true&lt;/immutable&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.repository.execute&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;
+   *    org.pentaho.platform.dataaccess.datasource.security.manage
+   *  &lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.repository.read&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.repository.create&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.scheduler.manage&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.security.administerSecurity&lt;/logicalRoles&gt;
+   *  &lt;logicalRoles&gt;org.pentaho.security.publish&lt;/logicalRoles&gt;
+   *  &lt;roleName&gt;Administrator&lt;/roleName&gt;
+   *  &lt;/assignments&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Administer Security&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.security.administerSecurity&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Schedule Content&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.scheduler.manage&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Read Content&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.repository.read&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Publish Content&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.security.publish&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Create Content&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.repository.create&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Execute&lt;/localizedName&gt;
+   *  &lt;roleName&gt;org.pentaho.repository.execute&lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;localizedRoleNames&gt;
+   *  &lt;localizedName&gt;Manage Data Sources&lt;/localizedName&gt;
+   *  &lt;roleName&gt;
+   *  org.pentaho.platform.dataaccess.datasource.security.manage
+   *  &lt;/roleName&gt;
+   *  &lt;/localizedRoleNames&gt;
+   *  &lt;/systemRolesMap&gt;
+   * </pre>
    */
   @GET
   @Path ( "/logicalRoleMap" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
-  @Facet ( name = "Unsupported" )
+  @StatusCodes ( {
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method" )
+  } )
   public SystemRolesMap getRoleBindingStruct( @QueryParam ( "locale" ) String locale ) {
-    if ( canAdminister() ) {
-      try {
-        RoleBindingStruct roleBindingStruct = roleBindingDao.getRoleBindingStruct( locale );
-        SystemRolesMap systemRolesMap = new SystemRolesMap();
-        for ( Map.Entry<String, String> localalizeNameEntry : roleBindingStruct.logicalRoleNameMap.entrySet() ) {
-          systemRolesMap.getLocalizedRoleNames().add(
-              new LocalizedLogicalRoleName( localalizeNameEntry.getKey(), localalizeNameEntry.getValue() ) );
-        }
-        for ( Map.Entry<String, List<String>> logicalRoleAssignments : roleBindingStruct.bindingMap.entrySet() ) {
-          systemRolesMap.getAssignments().add(
-              new LogicalRoleAssignment( logicalRoleAssignments.getKey(), logicalRoleAssignments.getValue()
-                  , roleBindingStruct.immutableRoles.contains( logicalRoleAssignments.getKey() ) )
-          );
-        }
-        return systemRolesMap;
-      } catch ( Throwable t ) {
-        throw new WebApplicationException( t );
-      }
-    } else {
-      throw new WebApplicationException( new Throwable() );
+    try {
+      return userRoleDaoService.getRoleBindingStruct( locale );
+    } catch ( Exception e ) {
+     throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
   }
 
   /**
-   * Associate a particular runtime role to list of logical role in the repository
+   * Associate a particular role to a list of physical permissions available in the system. Setting the physical permissions to the roles is a way to add and delete permissions from the role.
+   * Any permissions the role had before that are not on this list will be deleted. Any permissions on this list that were not previously assigned will now be assigned.
    *
-   * @param roleAssignments (logical to runtime role assignments)
-   * @return
+   *<p><b>Example Request:</b><br />
+   *  PUT /pentaho/api/userroledao/roleAssignments
+   *</p>
+   * <pre function="syntax.xml">
+   *   &lt;systemRolesMap&gt;
+   *   &lt;assignments&gt;
+   *   &lt;roleName&gt;Report Author&lt;/roleName&gt;
+   *   &lt;logicalRoles&gt;org.pentaho.scheduler.manage&lt;/logicalRoles&gt;
+   *   &lt;logicalRoles&gt;org.pentaho.repository.read&lt;/logicalRoles&gt;
+   *   &lt;logicalRoles&gt;org.pentaho.security.publish&lt;/logicalRoles&gt;
+   *   &lt;logicalRoles&gt;org.pentaho.repository.create&lt;/logicalRoles&gt;
+   *   &lt;logicalRoles&gt;org.pentaho.repository.execute&lt;/logicalRoles&gt;
+   *   &lt;/assignments&gt;
+   *   &lt;/systemRolesMap&gt;
+   * </pre>
+   *
+   * @param roleAssignments Built from the Request payload, an example of the role assignments exists in the example request.
+   *
+   * @return Response code determining the success of the operation.
    */
   @PUT
   @Consumes ( { APPLICATION_XML, APPLICATION_JSON } )
   @Path ( "/roleAssignments" )
-  @Facet ( name = "Unsupported" )
+  @StatusCodes ( {
+    @ResponseCode ( code = 200, condition = "Successfully applied the logical role assignment." ),
+    @ResponseCode ( code = 403, condition = "Only users with administrative privileges can access this method" )
+  } )
   public Response setLogicalRoles( LogicalRoleAssignments roleAssignments ) {
-    for ( LogicalRoleAssignment roleAssignment : roleAssignments.getAssignments() ) {
-      roleBindingDao.setRoleBindings( roleAssignment.getRoleName(), roleAssignment.getLogicalRoles() );
+    try {
+      userRoleDaoService.setLogicalRoles( roleAssignments );
+      return Response.ok().build();
+    } catch ( SecurityException e ) {
+      throw new WebApplicationException( Response.Status.FORBIDDEN );
     }
-    return Response.ok().build();
   }
 
   private ITenant getTenant( String tenantId ) throws NotFoundException {
@@ -669,7 +858,6 @@ public class UserRoleDaoResource extends AbstractJaxRSResource {
   private boolean canAdminister() {
     IAuthorizationPolicy policy = PentahoSystem.get( IAuthorizationPolicy.class );
     return policy.isAllowed( RepositoryReadAction.NAME ) && policy.isAllowed( RepositoryCreateAction.NAME )
-        && ( policy.isAllowed( AdministerSecurityAction.NAME ) );
+      && ( policy.isAllowed( AdministerSecurityAction.NAME ) );
   }
-
 }

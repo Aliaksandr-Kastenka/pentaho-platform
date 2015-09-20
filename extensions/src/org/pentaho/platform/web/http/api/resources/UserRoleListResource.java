@@ -19,13 +19,10 @@ package org.pentaho.platform.web.http.api.resources;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import static javax.ws.rs.core.MediaType.APPLICATION_XML;
-import static javax.ws.rs.core.MediaType.WILDCARD;
 import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
 
 import java.util.ArrayList;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
@@ -36,7 +33,6 @@ import javax.ws.rs.core.Response;
 
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
-import org.pentaho.platform.api.engine.security.userroledao.UncategorizedUserRoleDaoException;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.engine.security.DefaultRoleComparator;
@@ -59,15 +55,15 @@ public class UserRoleListResource extends AbstractJaxRSResource {
 
   public UserRoleListResource() {
     this( PentahoSystem.get( ArrayList.class, "singleTenantSystemAuthorities", PentahoSessionHolder.getSession() ),
-        PentahoSystem.get( String.class, "singleTenantAdminAuthorityName", PentahoSessionHolder.getSession() ),
-        PentahoSystem.get( String.class, "singleTenantAnonymousAuthorityName", PentahoSessionHolder.getSession() ),
-        PentahoSystem.get( ArrayList.class, "extraSystemAuthorities", PentahoSessionHolder.getSession() ) );
+      PentahoSystem.get( String.class, "singleTenantAdminAuthorityName", PentahoSessionHolder.getSession() ),
+      PentahoSystem.get( String.class, "singleTenantAnonymousAuthorityName", PentahoSessionHolder.getSession() ),
+      PentahoSystem.get( ArrayList.class, "extraSystemAuthorities", PentahoSessionHolder.getSession() ) );
   }
 
   public UserRoleListResource( final ArrayList<String> systemRoles, final String adminRole,
                                final ArrayList<String> extraRoles ) {
     this( systemRoles, adminRole, PentahoSystem.get( String.class, "singleTenantAnonymousAuthorityName",
-        PentahoSessionHolder.getSession() ), extraRoles );
+      PentahoSessionHolder.getSession() ), extraRoles );
   }
 
   public UserRoleListResource( final ArrayList<String> systemRoles, final String adminRole, final String anonymousRole,
@@ -102,8 +98,8 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/permission-users" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
-      @ResponseCode ( code = 500, condition = "Unable to retrieve User objects." )
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
+    @ResponseCode ( code = 500, condition = "Unable to retrieve User objects." )
   } )
   public UserListWrapper getPermissionUsers() throws Exception {
     return getUsers();
@@ -127,7 +123,7 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/permission-roles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of permission roles." )
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of permission roles." )
   } )
   public RoleListWrapper getPermissionRoles() throws Exception {
     return userRoleListService.getPermissionRoles( adminRole );
@@ -151,41 +147,11 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/users" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
-      @ResponseCode ( code = 500, condition = "Unable to retrieve User objects." )
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
+    @ResponseCode ( code = 500, condition = "Unable to retrieve User objects." )
   } )
   public UserListWrapper getUsers() throws Exception {
     return userRoleListService.getUsers();
-  }
-
-  /**
-   * Delete user(s) from the platform using a query parameter that takes a list of tab separated user names.
-   *
-   *<p><b>Example Request:</b><br />
-   *  DELETE  pentaho/api/userrolelist/users?userNames=user1%09user2%09
-   * </p>
-   *
-   * @param userNames (list of tab (\t) separated user names)
-   *
-   * @return Response object containing the status code of the operation
-   */
-  @DELETE
-  @Path ( "/users" )
-  @Consumes( { WILDCARD } )
-  @StatusCodes ( {
-    @ResponseCode ( code = 200, condition = "Successfully deleted the list of users." ),
-    @ResponseCode ( code = 403, condition = "A non administrative user is trying to access this endpoint." ),
-    @ResponseCode ( code = 500, condition = "The server ran into an error while attempting to access the repository, server logs should be checked for errors." )
-  } )
-  public Response deleteUser( @QueryParam( "userNames" ) String userNames ) {
-    try {
-      userRoleListService.deleteUsers( userNames );
-    } catch ( UnauthorizedException e ) {
-      throw new WebApplicationException( Response.Status.UNAUTHORIZED );
-    } catch ( UncategorizedUserRoleDaoException e ) {
-      throw new WebApplicationException( Response.Status.INTERNAL_SERVER_ERROR );
-    }
-    return Response.ok().build();
   }
 
   /**
@@ -206,7 +172,7 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/roles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
   } )
   public RoleListWrapper getRoles() {
     return userRoleListService.getRoles();
@@ -230,7 +196,7 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/allRoles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
   } )
   public RoleListWrapper getAllRoles() throws Exception {
     return userRoleListService.getAllRoles();
@@ -254,7 +220,7 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/systemRoles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully returns system role list." )
+    @ResponseCode ( code = 200, condition = "Successfully returns system role list." )
   } )
   public RoleListWrapper getSystemRoles() {
     return userRoleListService.getSystemRoles();
@@ -278,7 +244,7 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/extraRoles" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully returns extra role list." )
+    @ResponseCode ( code = 200, condition = "Successfully returns extra role list." )
   } )
   public RoleListWrapper getExtraRoles() {
     return userRoleListService.getExtraRolesList();
@@ -304,8 +270,8 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/getRolesForUser" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
-      @ResponseCode ( code = 500, condition = "Invalid user parameter." )
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of Role objects." ),
+    @ResponseCode ( code = 500, condition = "Invalid user parameter." )
   } )
   public Response getRolesForUser( @QueryParam ( "user" ) String user ) throws Exception {
     try {
@@ -338,8 +304,8 @@ public class UserRoleListResource extends AbstractJaxRSResource {
   @Path ( "/getUsersInRole" )
   @Produces ( { APPLICATION_XML, APPLICATION_JSON } )
   @StatusCodes ( {
-      @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
-      @ResponseCode ( code = 500, condition = "Missing the role parameter." )
+    @ResponseCode ( code = 200, condition = "Successfully retrieved the list of User objects." ),
+    @ResponseCode ( code = 500, condition = "Missing the role parameter." )
   } )
   public Response getUsersInRole( @QueryParam ( "role" ) String role ) throws Exception {
     try {

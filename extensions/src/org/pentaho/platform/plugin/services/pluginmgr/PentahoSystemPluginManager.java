@@ -26,6 +26,9 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 import org.apache.commons.lang.StringUtils;
+import org.dom4j.Document;
+import org.dom4j.DocumentException;
+import org.dom4j.Element;
 import org.pentaho.platform.api.engine.IConfiguration;
 import org.pentaho.platform.api.engine.IContentGenerator;
 import org.pentaho.platform.api.engine.IContentGeneratorInfo;
@@ -54,6 +57,7 @@ import org.pentaho.platform.api.engine.PluginServiceDefinition;
 import org.pentaho.platform.api.engine.ServiceException;
 import org.pentaho.platform.api.engine.ServiceInitializationException;
 import org.pentaho.platform.api.engine.perspective.pojo.IPluginPerspective;
+import org.pentaho.platform.config.PropertiesFileConfiguration;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.engine.core.system.objfac.spring.PentahoBeanScopeValidatorPostProcessor;
@@ -62,6 +66,7 @@ import org.pentaho.platform.engine.core.system.objfac.references.PrototypePentah
 import org.pentaho.platform.engine.core.system.objfac.references.SingletonPentahoObjectReference;
 import org.pentaho.platform.plugin.services.messages.Messages;
 import org.pentaho.platform.plugin.services.pluginmgr.servicemgr.ServiceConfig;
+import org.pentaho.platform.util.xml.dom4j.XmlDom4JHelper;
 import org.pentaho.ui.xul.XulOverlay;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,6 +93,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 /**
@@ -103,6 +109,7 @@ public class PentahoSystemPluginManager implements IPluginManager {
   private static final String METAPROVIDER_KEY_PREFIX = "METAPROVIDER-";
   public static final String CONTENT_TYPE = "content-type";
   public static final String PLUGIN_ID = "plugin-id";
+  public static final String SETTINGS_PREFIX = "settings/";
 
   private final Multimap<String, IPentahoObjectRegistration> handleRegistry =
       Multimaps.synchronizedMultimap( ArrayListMultimap
@@ -371,6 +378,8 @@ public class PentahoSystemPluginManager implements IPluginManager {
 
     registerOverlays( plugin );
 
+    registerSettings( plugin, loader );
+
     // service registry must take place after bean registry since
     // a service class may be configured as a plugin bean
     registerServices( plugin, loader, beanFactory );
@@ -493,6 +502,36 @@ public class PentahoSystemPluginManager implements IPluginManager {
     }
 
     return services;
+  }
+
+  private void registerSettings( IPlatformPlugin plugin, ClassLoader loader ) {
+
+    IPluginResourceLoader resLoader = PentahoSystem.get( IPluginResourceLoader.class, null );
+
+
+    InputStream stream = resLoader.getResourceAsStream( loader, "settings.xml" );
+    if( stream == null ){
+      // No settings.xml is fine
+      return;
+    }
+    Properties properties = new Properties();
+    try {
+      Document docFromStream = XmlDom4JHelper.getDocFromStream( stream );
+      for ( Object element : docFromStream.getRootElement().elements() ) {
+        Element ele = (Element) element;
+        String name = ele.getName();
+        String value = ele.getText();
+        properties.put( "settings/" + name, value );
+      }
+    } catch ( DocumentException | IOException e ) {
+      logger.error( "Error parsing settings.xml for plugin: "+ plugin.getId(), e );
+    }
+    try {
+      systemConfig.registerConfiguration( new PropertiesFileConfiguration( plugin.getId(), properties ) );
+    } catch ( IOException e ) {
+      logger.error( "Error registering settings.xml for plugin: "+ plugin.getId(), e );
+    }
+
   }
 
   private void registerPerspectives( IPlatformPlugin plugin, ClassLoader loader ) {
@@ -987,12 +1026,29 @@ public class PentahoSystemPluginManager implements IPluginManager {
     final IConfiguration pluginConfig = systemConfig.getConfiguration( pluginId );
     if ( pluginConfig != null ) {
       try {
-        return pluginConfig.getProperties().getProperty( key, defaultValue );
+        // key can be the plain setting name or "settings/" + key. The old system was flexible in this regard so we need
+        // to be as well
+        if( pluginConfig.getProperties().containsKey( key ) ){
+          return pluginConfig.getProperties().getProperty( key );
+        }
+        if( key.startsWith( SETTINGS_PREFIX ) ){
+          return defaultValue;
+        }
+
+        // try it with settings on the front
+        String compositeKey = SETTINGS_PREFIX + key;
+        if( pluginConfig.getProperties().containsKey( compositeKey ) ){
+          return pluginConfig.getProperties().getProperty( compositeKey );
+        }
+
+        // fall-down to the default
+        return defaultValue;
+
       } catch ( IOException e ) {
         logger.error( "unable to access plugin settings", e );
       }
     }
-    return null;
+    return defaultValue;
   }
 
   @Deprecated

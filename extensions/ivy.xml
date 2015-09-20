@@ -18,6 +18,7 @@
   <dependencies defaultconf="default->default">
 
     <!--  external dependencies -->
+    <dependency org="commons-codec" name="commons-codec" rev="1.9" transitive="false"/>
     <dependency org="commons-collections" name="commons-collections" rev="3.2" transitive="false"/>
     <dependency org="commons-cli" name="commons-cli" rev="1.2" transitive="false"/>
     <dependency org="commons-dbcp" name="commons-dbcp" rev="1.4" transitive="false" />
@@ -25,9 +26,9 @@
     <dependency org="commons-io" name="commons-io" rev="2.1" transitive="false"/>
     <dependency org="commons-fileupload" name="commons-fileupload" rev="1.3.1"/>
     <dependency org="commons-httpclient" name="commons-httpclient" rev="3.0.1" transitive="false"/>
-    <dependency org="commons-logging" name="commons-logging" rev="1.1.1" transitive="false"/>
+    <dependency org="commons-logging" name="commons-logging" rev="1.1.3" transitive="false"/>
     <dependency org="commons-lang" name="commons-lang" rev="2.4" transitive="false"/>
-    <dependency org="org.apache.commons" name="commons-vfs2" rev="2.0" transitive="false"/>
+    <dependency org="org.apache.commons" name="commons-vfs2" rev="2.1-20150824" transitive="false"/>
     <dependency org="org.owasp.esapi" name="esapi" rev="2.0.1" transitive="false" />
 
     <dependency org="org.slf4j" name="slf4j-api" rev="1.7.3"/>
@@ -60,7 +61,7 @@
     <dependency org="com.thoughtworks.xstream" name="xstream" rev="${dependency.xstream.revision}"/>
 
     <!--  The PDI Excel output step depends on this  -->
-    <dependency org="org.apache.xmlbeans" name="xmlbeans" rev="2.5.0" transitive="false"/>
+    <dependency org="org.apache.xmlbeans" name="xmlbeans" rev="2.6.0" transitive="false"/>
 
     <!--  PDI Elastic search bulk loader -->
     <dependency org="elasticsearch" name="elasticsearch" rev="0.16.3" transitive="false"/>
@@ -99,14 +100,14 @@
     <dependency org="org.hibernate"     name="hibernate-validator"  rev="4.2.0.Final" transitive="false"/>
     <dependency org="javax.validation"  name="validation-api"   rev="1.0.0.GA"  transitive="false"/>
 
-    <dependency org="org.apache.axis2" name="axis2-adb" rev="1.4.1" transitive="false"/>
-    <dependency org="org.apache.axis2" name="axis2-codegen" rev="1.4.1" transitive="false"/>
-    <dependency org="org.apache.axis2" name="axis2-java2wsdl" rev="1.4.1" transitive="false"/>
-    <dependency org="org.apache.axis2" name="axis2-kernel" rev="1.4.1" transitive="false"/>
-
-    <dependency org="org.apache.ws.commons.axiom" name="axiom-api" rev="1.2.7" transitive="false"/>
-    <dependency org="org.apache.ws.commons.axiom" name="axiom-dom" rev="1.2.7" transitive="false"/>
-    <dependency org="org.apache.ws.commons.axiom" name="axiom-impl" rev="1.2.7" transitive="false"/>
+    <dependency org="org.apache.axis2" name="axis2-adb" rev="1.5" transitive="false"/>
+    <dependency org="org.apache.axis2" name="axis2-codegen" rev="1.5" transitive="false"/>
+    <dependency org="org.apache.axis2" name="axis2-java2wsdl" rev="1.5" transitive="false"/>
+    <dependency org="org.apache.axis2" name="axis2-kernel" rev="1.5" transitive="false"/>
+    <dependency org="org.apache.axis2" name="axis2-transport-http" rev="1.5" transitive="false"/>
+    <dependency org="org.apache.ws.commons.axiom" name="axiom-api" rev="1.2.8" transitive="false"/>
+    <dependency org="org.apache.ws.commons.axiom" name="axiom-dom" rev="1.2.8" transitive="false"/>
+    <dependency org="org.apache.ws.commons.axiom" name="axiom-impl" rev="1.2.8" transitive="false"/>
 
     <dependency org="oro" name="oro" rev="2.0.8"/>
     <dependency org="org.tuckey" name="urlrewrite" rev="3.2.0"/>
@@ -283,9 +284,9 @@
     <dependency org="org.codehaus.jackson" name="jackson-mapper-asl" rev="1.5.2" changing="true" transitive="false"/>
 
     <dependency org="org.odftoolkit" name="odfdom-java" rev="0.8.6" conf="default->default" transitive="false"/>
-    <dependency org="org.apache.poi" name="poi" rev="3.8" conf="default->default" transitive="false"/>
-    <dependency org="org.apache.poi" name="poi-ooxml" rev="3.8" conf="default->default" transitive="false"/>
-    <dependency org="org.apache.poi" name="poi-ooxml-schemas" rev="3.8" conf="default->default" transitive="false"/>
+    <dependency org="org.apache.poi" name="poi" rev="3.12" conf="default->default" transitive="false"/>
+    <dependency org="org.apache.poi" name="poi-ooxml" rev="3.12" conf="default->default" transitive="false"/>
+    <dependency org="org.apache.poi" name="poi-ooxml-schemas" rev="3.12" conf="default->default" transitive="false"/>
     <dependency org="org.apache.xbean" name="xbean" rev="2.5" conf="default->default" transitive="false"/>
     <dependency org="org.yaml" name="snakeyaml" rev="1.7" conf="default->default" transitive="false"/>
     <dependency org="com.googlecode.json-simple" name="json-simple" rev="1.1" conf="default->default"
@@ -329,7 +330,6 @@
 
     <!--  runtime dependencies -->
     <dependency org="annogen" name="annogen" rev="0.1.0" conf="runtime->default"/>
-    <dependency org="backport-util-concurrent" name="backport-util-concurrent" rev="3.1" conf="runtime->default"/>
     <dependency org="org.apache.httpcomponents" name="httpcore" rev="4.0-beta3" transitive="false"
                 conf="runtime->default"/>
     <!-- rev 2.0.4 would be better -->
@@ -350,7 +350,7 @@
     <dependency org="org.apache.felix" name="org.apache.felix.http.base" rev="2.3.0"/>
 
     <!--  testing dependencies -->
-    <dependency org="junit" name="junit" rev="4.11" conf="test->default"/>
+    <dependency org="junit" name="junit" rev="4.12" conf="test->default"/>
     <dependency org="com.dumbster" name="dumbster" rev="1.6.0" conf="test->default"/>
 
     <dependency org="org.jmock" name="jmock-junit4" rev="2.5.1" conf="test->default"/>
@@ -410,7 +410,7 @@
     <!-- CM-241 -->
     <exclude org="cglib" module="cglib"/>
 
-    <override org="junit" module="junit" rev="4.4"/>
+    <override org="junit" module="junit" rev="4.12"/>
     <override org="asm" module="asm" rev="3.1"/>
 
     <override org="pentaho-kettle" rev="${dependency.kettle.revision}" />

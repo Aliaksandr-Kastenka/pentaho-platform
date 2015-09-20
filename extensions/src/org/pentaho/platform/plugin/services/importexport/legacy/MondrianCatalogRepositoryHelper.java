@@ -13,9 +13,30 @@
 
 package org.pentaho.platform.plugin.services.importexport.legacy;
 
+import org.apache.commons.io.IOUtils;
+import org.pentaho.platform.api.engine.IPentahoSession;
+import org.pentaho.platform.api.engine.IUserRoleListService;
+import org.pentaho.platform.api.repository.RepositoryException;
+import org.pentaho.platform.api.repository2.unified.IRepositoryFileData;
+import org.pentaho.platform.api.repository2.unified.IUnifiedRepository;
+import org.pentaho.platform.api.repository2.unified.MondrianSchemaAnnotator;
+import org.pentaho.platform.api.repository2.unified.RepositoryFile;
+import org.pentaho.platform.api.repository2.unified.RepositoryFilePermission;
+import org.pentaho.platform.api.repository2.unified.data.node.DataNode;
+import org.pentaho.platform.api.repository2.unified.data.node.DataProperty;
+import org.pentaho.platform.api.repository2.unified.data.node.NodeRepositoryFileData;
+import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
+import org.pentaho.platform.engine.core.system.PentahoSystem;
+import org.pentaho.platform.engine.security.SecurityHelper;
+import org.pentaho.platform.plugin.action.olap.IOlapServiceException;
+import org.pentaho.platform.plugin.services.importexport.StreamConverter;
+import org.pentaho.platform.repository2.ClientRepositoryPaths;
+import org.pentaho.platform.repository2.unified.fileio.RepositoryFileInputStream;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,23 +52,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 
-import org.apache.commons.io.IOUtils;
-import org.pentaho.platform.api.engine.IPentahoSession;
-import org.pentaho.platform.api.engine.IUserRoleListService;
-import org.pentaho.platform.api.repository2.unified.IRepositoryFileData;
-import org.pentaho.platform.api.repository2.unified.IUnifiedRepository;
-import org.pentaho.platform.api.repository2.unified.RepositoryFile;
-import org.pentaho.platform.api.repository2.unified.RepositoryFilePermission;
-import org.pentaho.platform.api.repository2.unified.data.node.DataNode;
-import org.pentaho.platform.api.repository2.unified.data.node.DataProperty;
-import org.pentaho.platform.api.repository2.unified.data.node.NodeRepositoryFileData;
-import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
-import org.pentaho.platform.engine.core.system.PentahoSystem;
-import org.pentaho.platform.engine.security.SecurityHelper;
-import org.pentaho.platform.plugin.action.olap.IOlapServiceException;
-import org.pentaho.platform.plugin.services.importexport.StreamConverter;
-import org.pentaho.platform.repository2.ClientRepositoryPaths;
-import org.pentaho.platform.repository2.unified.fileio.RepositoryFileInputStream;
+import static org.pentaho.platform.repository.solution.filebased.MondrianVfs.*;
 
 public class MondrianCatalogRepositoryHelper {
 
@@ -101,7 +106,17 @@ public class MondrianCatalogRepositoryHelper {
         new StreamConverter().convert(
             repoFileBundle.getInputStream(), repoFileBundle.getCharset(), repoFileBundle.getMimeType() );
     if ( schema == null ) {
-      repository.createFile( catalog.getId(), repoFileBundle.getFile(), data, null );
+      RepositoryFile schemaFile = repository.createFile( catalog.getId(), repoFileBundle.getFile(), data, null );
+      if ( schemaFile != null ) {
+        // make sure the folder is not set to hidden if the schema is not hidden
+        RepositoryFile catalogFolder =
+          repository.getFile( ETC_MONDRIAN_JCR_FOLDER + RepositoryFile.SEPARATOR + catalogName );
+        if ( catalogFolder.isHidden() != schemaFile.isHidden() ) {
+          RepositoryFile unhiddenFolder =
+            ( new RepositoryFile.Builder( catalogFolder ) ).hidden( schemaFile.isHidden() ).build();
+          repository.updateFolder( unhiddenFolder, "" );
+        }
+      }
     } else {
       repository.updateFile( schema, data, null );
     }
@@ -422,15 +437,37 @@ public class MondrianCatalogRepositoryHelper {
 
     for ( RepositoryFile repoFile : repository.getChildren( catalogFolder.getId() ) ) {
       RepositoryFileInputStream is;
+      if ( repoFile.getName().equals( "metadata" ) ) {
+        continue;
+      }
       try {
-        if ( repoFile.getName().equals( "metadata" ) ) {
-          continue;
-        }
-        is = new RepositoryFileInputStream( repoFile );
-      } catch ( Exception e ) {
-        return null; // This pretty much ensures an exception will be thrown later and passed to the client
+        is = new RepositoryFileInputStream( repoFile, repository );
+      } catch ( FileNotFoundException e ) {
+        throw new RepositoryException( e );
       }
       values.put( repoFile.getName(), is );
+    }
+    if ( values.containsKey( ANNOTATIONS_XML ) && values.containsKey( SCHEMA_XML ) ) {
+      return includeAnnotatedSchema( values );
+    }
+    return values;
+  }
+
+  private Map<String, InputStream> includeAnnotatedSchema( final Map<String, InputStream> values ) {
+    MondrianSchemaAnnotator annotator =
+        PentahoSystem.get( MondrianSchemaAnnotator.class, ANNOTATOR_KEY, PentahoSessionHolder.getSession() );
+    try {
+      if ( annotator != null ) {
+        byte[] schemaBytes = IOUtils.toByteArray( values.get( SCHEMA_XML ) );
+        byte[] annotationBytes = IOUtils.toByteArray( values.get( ANNOTATIONS_XML ) );
+        values.put( SCHEMA_XML, new ByteArrayInputStream( schemaBytes ) );
+        values.put( ANNOTATIONS_XML, new ByteArrayInputStream( annotationBytes ) );
+        values.put( "schema.annotated.xml",
+            annotator.getInputStream(
+              new ByteArrayInputStream( schemaBytes ), new ByteArrayInputStream( annotationBytes ) ) );
+      }
+    } catch ( IOException e ) {
+      throw new RepositoryException( e );
     }
     return values;
   }

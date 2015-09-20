@@ -21,8 +21,12 @@ package org.pentaho.platform.plugin.services.importexport.exportManifest;
 import org.pentaho.database.model.DatabaseConnection;
 import org.pentaho.platform.api.repository2.unified.RepositoryFile;
 import org.pentaho.platform.api.repository2.unified.RepositoryFileAcl;
+import org.pentaho.platform.plugin.services.importexport.ExportManifestUserSetting;
+import org.pentaho.platform.plugin.services.importexport.RoleExport;
+import org.pentaho.platform.plugin.services.importexport.UserExport;
 import org.pentaho.platform.plugin.services.importexport.exportManifest.bindings.ExportManifestDto;
 import org.pentaho.platform.plugin.services.importexport.exportManifest.bindings.ExportManifestEntityDto;
+import org.pentaho.platform.plugin.services.importexport.exportManifest.bindings.ExportManifestMetaStore;
 import org.pentaho.platform.plugin.services.importexport.exportManifest.bindings.ExportManifestMetadata;
 import org.pentaho.platform.plugin.services.importexport.exportManifest.bindings.ExportManifestMondrian;
 import org.pentaho.platform.web.http.api.resources.JobScheduleRequest;
@@ -33,7 +37,6 @@ import javax.xml.bind.JAXBException;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.namespace.QName;
-
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.OutputStream;
@@ -57,6 +60,10 @@ public class ExportManifest {
   private List<ExportManifestMondrian> mondrianList = new ArrayList<ExportManifestMondrian>();
   private List<JobScheduleRequest> scheduleList = new ArrayList<JobScheduleRequest>();
   private List<DatabaseConnection> datasourceList = new ArrayList<DatabaseConnection>();
+  private List<UserExport> userExports = new ArrayList<UserExport>();
+  private List<RoleExport> roleExports = new ArrayList<RoleExport>();
+  private List<ExportManifestUserSetting> globalUserSettings = new ArrayList<>();
+  private ExportManifestMetaStore metaStore;
 
   public ExportManifest() {
     this.exportManifestEntities = new HashMap<String, ExportManifestEntity>();
@@ -75,6 +82,10 @@ public class ExportManifest {
     this.metadataList = exportManifestDto.getExportManifestMetadata();
     this.scheduleList = exportManifestDto.getExportManifestSchedule();
     this.datasourceList = exportManifestDto.getExportManifestDatasource();
+    this.userExports = exportManifestDto.getExportManifestUser();
+    this.roleExports = exportManifestDto.getExportManifestRole();
+    this.globalUserSettings = exportManifestDto.getGlobalUserSettings();
+    setMetaStore( exportManifestDto.getExportManifestMetaStore() );
   }
 
   /**
@@ -129,7 +140,7 @@ public class ExportManifest {
     final JAXBContext jaxbContext = JAXBContext.newInstance( ExportManifestDto.class );
     Marshaller marshaller = getMarshaller();
     marshaller.marshal( new JAXBElement<ExportManifestDto>( new QName( "http://www.pentaho.com/schema/",
-        "ExportManifest" ), ExportManifestDto.class, getExportManifestDto() ), outputStream );
+      "ExportManifest" ), ExportManifestDto.class, getExportManifestDto() ), outputStream );
   }
 
   public String toXmlString() throws JAXBException {
@@ -177,6 +188,10 @@ public class ExportManifest {
     rawExportManifest.getExportManifestMondrian().addAll( this.mondrianList );
     rawExportManifest.getExportManifestSchedule().addAll( this.scheduleList );
     rawExportManifest.getExportManifestDatasource().addAll( this.datasourceList );
+    rawExportManifest.getExportManifestUser().addAll( this.getUserExports() );
+    rawExportManifest.getExportManifestRole().addAll( this.getRoleExports() );
+    rawExportManifest.setExportManifestMetaStore( this.getMetaStore() );
+    rawExportManifest.getGlobalUserSettings().addAll( this.getGlobalUserSettings() );
 
     return rawExportManifest;
   }
@@ -253,5 +268,36 @@ public class ExportManifest {
 
   public List<DatabaseConnection> getDatasourceList() {
     return datasourceList;
+  }
+
+  public List<UserExport> getUserExports() {
+    return userExports;
+  }
+
+  public void addUserExport( UserExport userExport ) {
+    this.userExports.add( userExport );
+  }
+
+  public List<RoleExport> getRoleExports() {
+    return roleExports;
+  }
+
+  public void addRoleExport( RoleExport roleExport ) {
+    this.roleExports.add( roleExport );
+  }
+
+  public void setMetaStore( ExportManifestMetaStore metaStore ) {
+    this.metaStore = metaStore;
+  }
+
+  public ExportManifestMetaStore getMetaStore() {
+    return metaStore;
+  }
+
+  public List<ExportManifestUserSetting> getGlobalUserSettings() {
+    return globalUserSettings;
+  }
+  public void addGlobalUserSetting( ExportManifestUserSetting globalSetting ) {
+    globalUserSettings.add( globalSetting );
   }
 }

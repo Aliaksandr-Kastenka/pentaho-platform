@@ -124,7 +124,7 @@ public class SolutionImportHandler implements IPlatformImportHandler {
       for ( ExportManifestMetadata exportManifestMetadata : metadataList ) {
 
         String domainId = exportManifestMetadata.getDomainId();
-        boolean overWriteInRepository = true;
+        boolean overWriteInRepository = isOverwriteFile();
         RepositoryFileImportBundle.Builder bundleBuilder =
             new RepositoryFileImportBundle.Builder().charSet( "UTF-8" )
               .hidden( false )
@@ -151,7 +151,7 @@ public class SolutionImportHandler implements IPlatformImportHandler {
 
         RepositoryFileImportBundle.Builder bundleBuilder =
             new RepositoryFileImportBundle.Builder().charSet( "UTF_8" ).hidden( false ).name( catName ).overwriteFile(
-              true ).mime( "application/vnd.pentaho.mondrian+xml" )
+              isOverwriteFile() ).mime( "application/vnd.pentaho.mondrian+xml" )
                 .withParam( "parameters", parametersStr.toString() ).withParam( "domain-id", catName ); // TODO: this is
         // definitely
         // named wrong
@@ -184,8 +184,10 @@ public class SolutionImportHandler implements IPlatformImportHandler {
     for ( IRepositoryFileBundle file : importSource.getFiles() ) {
       String fileName = file.getFile().getName();
       String actualFilePath = file.getPath();
-      fileName = ExportFileNameEncoder.decodeZipFileName( fileName );
-      actualFilePath = ExportFileNameEncoder.decodeZipFileName( actualFilePath );
+      if ( manifestVersion != null ) {
+        fileName = ExportFileNameEncoder.decodeZipFileName( fileName );
+        actualFilePath = ExportFileNameEncoder.decodeZipFileName( actualFilePath );
+      }
       String repositoryFilePath =
           RepositoryFilenameUtils.concat( PentahoPlatformImporter.computeBundlePath( actualFilePath ), fileName );
 
@@ -204,8 +206,10 @@ public class SolutionImportHandler implements IPlatformImportHandler {
 
       String decodedFilePath = file.getPath();
       RepositoryFile decodedFile = file.getFile();
-      decodedFile = new RepositoryFile.Builder( decodedFile ).path( decodedFilePath ).name( fileName ).title( fileName ).build();
-      decodedFilePath = ExportFileNameEncoder.decodeZipFileName( file.getPath() );
+      if ( manifestVersion != null ) {
+        decodedFile = new RepositoryFile.Builder( decodedFile ).path( decodedFilePath ).name( fileName ).title( fileName ).build();
+        decodedFilePath = ExportFileNameEncoder.decodeZipFileName( file.getPath() );
+      }
 
       if ( file.getFile().isFolder() ) {
         bundleBuilder.mime( "text/directory" );
@@ -290,12 +294,20 @@ public class SolutionImportHandler implements IPlatformImportHandler {
       if ( datasourceList != null ) {
         IDatasourceMgmtService datasourceMgmtSvc = PentahoSystem.get( IDatasourceMgmtService.class );
         for ( org.pentaho.database.model.DatabaseConnection databaseConnection : datasourceList ) {
+          if ( databaseConnection.getDatabaseType() == null ) {
+            // don't try to import the connection if there is no type it will cause an error
+            // However, if this is the DI Server, and the connection is defined in a ktr, it will import automatically
+            log.warn( "Can't import connection " + databaseConnection.getName() + " because it doesn't have a databaseType" );
+            continue;
+          }
           try {
             IDatabaseConnection existingDBConnection =
                 datasourceMgmtSvc.getDatasourceByName( databaseConnection.getName() );
             if ( existingDBConnection != null && existingDBConnection.getName() != null ) {
-              databaseConnection.setId( existingDBConnection.getId() );
-              datasourceMgmtSvc.updateDatasourceByName( databaseConnection.getName(), databaseConnection );
+              if ( isOverwriteFile() ) {
+                databaseConnection.setId( existingDBConnection.getId() );
+                datasourceMgmtSvc.updateDatasourceByName( databaseConnection.getName(), databaseConnection );
+              }
             } else {
               datasourceMgmtSvc.createDatasource( databaseConnection );
             }

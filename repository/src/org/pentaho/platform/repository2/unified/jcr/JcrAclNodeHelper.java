@@ -75,10 +75,10 @@ public class JcrAclNodeHelper implements IAclNodeHelper {
   @Override public boolean canAccess( final RepositoryFile repositoryFile,
                                       final EnumSet<RepositoryFilePermission> permissions ) {
 
-    if(repositoryFile == null) {
+    if ( repositoryFile == null ) {
       return false;
     }
-      
+
     // Obtain a reference to ACL node as "system", guaranteed access
     final RepositoryFile aclNode = getAclNode( repositoryFile );
     
@@ -88,13 +88,17 @@ public class JcrAclNodeHelper implements IAclNodeHelper {
       return true;
     }
 
-    // Check to see if user has READ access to file, this will throw and exception if not.
+    boolean notFound;
     try {
-      unifiedRepository.getFileById( aclNode.getId() );
+      // Check to see if user has READ access to file, this will return null if not.
+      notFound = ( unifiedRepository.getFileById( aclNode.getId() ) == null );
     } catch ( Exception e ) {
-      if (logger.isWarnEnabled()) {
+      if ( logger.isWarnEnabled() ) {
         logger.warn( "Error checking access for file", e );
       }
+      notFound = true;
+    }
+    if ( notFound ) {
       return false;
     }
 
@@ -108,6 +112,10 @@ public class JcrAclNodeHelper implements IAclNodeHelper {
    * {@inheritDoc}
    */
   @Override public RepositoryFileAcl getAclFor( final RepositoryFile repositoryFile ) {
+
+    if ( repositoryFile == null ) {
+      return null;
+    }
 
     // Obtain a reference to ACL node as "system", guaranteed access
     final RepositoryFile aclNode = getAclNode( repositoryFile );

@@ -176,6 +176,12 @@ public class SqlMetadataQueryExec extends BaseMetadataQueryExec {
           }
         }
       }
+	  
+	        /**/
+      if( sqlParams != null && sqlParams.size() == 0 ) {
+    	  sqlParams.add( "" );
+      }
+      /**/
 
       try {
         if ( !isForwardOnly() ) {

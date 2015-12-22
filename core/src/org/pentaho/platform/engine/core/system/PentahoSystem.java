@@ -74,6 +74,7 @@ import org.pentaho.platform.engine.core.solution.PentahoSessionParameterProvider
 import org.pentaho.platform.engine.core.solution.SimpleParameterProvider;
 import org.pentaho.platform.engine.core.system.objfac.AggregateObjectFactory;
 import org.pentaho.platform.engine.core.system.objfac.OSGIRuntimeObjectFactory;
+import org.pentaho.platform.engine.core.system.status.PeriodicStatusLogger;
 import org.pentaho.platform.engine.security.SecurityHelper;
 import org.pentaho.platform.util.logging.Logger;
 import org.pentaho.platform.util.messages.LocaleHelper;
@@ -84,8 +85,6 @@ import org.springframework.security.context.SecurityContext;
 import org.springframework.security.context.SecurityContextHolder;
 import org.springframework.security.providers.UsernamePasswordAuthenticationToken;
 import org.springframework.security.userdetails.User;
-import org.pentaho.platform.engine.core.system.status.ServerStatusProvider;
-import org.pentaho.platform.engine.core.system.status.PeriodicStatusLogger;
 
 public class PentahoSystem {
 
@@ -188,6 +187,8 @@ public class PentahoSystem {
       .decorate( PentahoSystem.ACLFileExtensionList );
 
   private static final List logoutListeners = Collections.synchronizedList( new ArrayList() );
+  
+  private static final IServerStatusProvider serverStatusProvider = IServerStatusProvider.LOCATOR.getProvider();
 
   // TODO even if logging is not configured messages need to make it out to
   // the console
@@ -218,7 +219,7 @@ public class PentahoSystem {
     aggObjectFactory.registerObjectFactory( PentahoSystem.runtimeObjectFactory );
   }
 
-  public static void setBundleContext( BundleContext context ) {
+  public static void setBundleContext( BundleContext context ){
     runtimeObjectFactory.setBundleContext( context );
   }
 
@@ -230,44 +231,126 @@ public class PentahoSystem {
     return PentahoSystem.init( pApplicationContext, null );
   }
 
-  public static boolean init( final IApplicationContext pApplicationContext, final boolean useThread ) {
-    return PentahoSystem.init( pApplicationContext, null, useThread );
-  }
-
   public static boolean init( final IApplicationContext pApplicationContext, final Map listenerMap ) {
-    return PentahoSystem.init( pApplicationContext, listenerMap, false );
-  }
-
-  public static boolean init( final IApplicationContext pApplicationContext, final Map listenerMap, final boolean useThread ) {
     if ( debug ) {
       Logger.debug( PentahoSystem.class, "PentahoSystem init called" ); //$NON-NLS-1$
     }
 
     if ( PentahoSystem.initializedStatus == PentahoSystem.SYSTEM_INITIALIZED_OK ) {
+      // TODO: Removing the catching of this IllegalStateException. It's being trapped here now as too many existing
+      // tests call init more than once without an intervening shutdown().
       try {
         throw new IllegalStateException( "'Init' method was run twice without 'shutdown'" );
-      } catch ( IllegalStateException e ) {
+      } catch( IllegalStateException e ) {
         Logger.error( PentahoSystem.class,
             "PentahoSystem was already initialized when init() called again without a preceding shutdown(). "
                 + "This is likely in error", e );
       }
-    } else {
-      PentahoSystem.applicationContext = pApplicationContext;
-      PentahoSystem.initializedStatus = PentahoSystem.SYSTEM_INITIALIZED_OK;
+    }
 
-      if ( useThread ) {
-        final Thread startingThread = new Thread( new Runnable() {
-          @Override
-          public void run() {
-            doInit();
-          }
-        } );
-        startingThread.start();
-      } else {
-        doInit();
+    PentahoSystem.initializedStatus = PentahoSystem.SYSTEM_INITIALIZED_OK;
+    
+    // PDI-3438 Scheduled job fails to open a transformation
+    // Kettle jobs spawn threads which may require authentication to load transformations from
+    // the kettle repository, by using the INHERITABLETHREADLOCAL strategy, spawned threads will
+    // enjoy the same SecurityContext as their parent!
+    SecurityContextHolder.setStrategyName( securityContextHolderStrategy );
+
+    PentahoSystem.globalAttributes = Collections.synchronizedMap( new HashMap() );
+    PentahoSystem.globalParameters = new SimpleParameterProvider( PentahoSystem.globalAttributes );
+
+    PentahoSystem.applicationContext = pApplicationContext;
+
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Setting property path" ); //$NON-NLS-1$
+    }
+    System.setProperty( "pentaho.solutionpath", "solution:" ); //$NON-NLS-1$
+    if ( LocaleHelper.getLocale() == null ) {
+      LocaleHelper.setLocale( Locale.getDefault() );
+    }
+
+    if ( PentahoSystem.systemSettingsService != null ) {
+      if ( debug ) {
+        Logger.debug( PentahoSystem.class, "Reading ACL list from pentaho.xml" ); //$NON-NLS-1$
+      }
+      // Set Up ACL File Extensions by reading pentaho.xml for acl-files
+      //
+      // Read the files that are permitted to have ACLs on them from
+      // the pentaho.xml.
+      //
+      String aclFiles = PentahoSystem.getSystemSetting( "acl-files", "xaction,url" ); //$NON-NLS-1$ //$NON-NLS-2$
+      StringTokenizer st = new StringTokenizer( aclFiles, "," ); //$NON-NLS-1$
+      String extn;
+      while ( st.hasMoreElements() ) {
+        extn = st.nextToken();
+        if ( !extn.startsWith( "." ) ) { //$NON-NLS-1$
+          extn = "." + extn; //$NON-NLS-1$
+        }
+        PentahoSystem.ACLFileExtensionList.add( extn );
       }
     }
 
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Set Java System Properties" ); //$NON-NLS-1$
+    }
+    PentahoSystem.setSystemProperties();
+
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Initialize XML Factories" ); //$NON-NLS-1$
+    }
+    PentahoSystem.initXMLFactories();
+
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Set Logging Level from pentaho.xml setting" ); //$NON-NLS-1$
+    }
+    PentahoSystem.loggingLevel = ILogger.ERROR;
+    if ( PentahoSystem.systemSettingsService != null ) {
+      PentahoSystem.loggingLevel =
+          Logger.getLogLevel( PentahoSystem.systemSettingsService.getSystemSetting( "log-level", "ERROR" ) ); //$NON-NLS-1$//$NON-NLS-2$
+    }
+
+    Logger.setLogLevel( PentahoSystem.loggingLevel );
+
+    // to guarantee hostnames in SSL mode are not being spoofed
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Register host name verifier" ); //$NON-NLS-1$
+    }
+    PentahoSystem.registerHostnameVerifier();
+
+    assert null != aggObjectFactory : "aggObjectFactory must be non-null"; //$NON-NLS-1$
+    try {
+      if ( debug ) {
+        Logger.debug( PentahoSystem.class, "Validating object factory" ); //$NON-NLS-1$
+      }
+      PentahoSystem.validateObjectFactory();
+    } catch ( PentahoSystemException e1 ) {
+      throw new RuntimeException( e1 ); // this is fatal
+    }
+
+    // store a list of the system listeners
+    try {
+      if ( debug ) {
+        Logger.debug( PentahoSystem.class, "Start System Listeners" ); //$NON-NLS-1$
+      }
+      PentahoSystem.notifySystemListenersOfStartup();
+    } catch ( PentahoSystemException e ) {
+      String msg = e.getLocalizedMessage();
+      Logger.error( PentahoSystem.class.getName(), msg, e );
+      PentahoSystem.initializedStatus |= PentahoSystem.SYSTEM_LISTENERS_FAILED;
+      PentahoSystem.addInitializationFailureMessage( PentahoSystem.SYSTEM_LISTENERS_FAILED, msg );
+      return false;
+    }
+
+    // once everything else is initialized, start global actions
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "Global startup" ); //$NON-NLS-1$
+    }
+    PentahoSystem.globalStartup();
+
+    if ( debug ) {
+      Logger.debug( PentahoSystem.class, "PentahoSystem Init Complete" ); //$NON-NLS-1$
+    }
+    
     return true;
   }
 
@@ -451,7 +534,7 @@ public class PentahoSystem {
 
   private static void setSystemProperties() {
     ISystemConfig systemConfig = PentahoSystem.get( ISystemConfig.class );
-    if ( systemConfig == null ) {
+    if( systemConfig == null ){
       return;
     }
     final IConfiguration configuration = systemConfig.getConfiguration( JAVA_SYSTEM_PROPERTIES );
@@ -592,7 +675,7 @@ public class PentahoSystem {
    * the thread local in PentahoSessionHolder in order for you to be able to access session-bound objects.
    */
   public static <T> T
-      get( Class<T> interfaceClass, final IPentahoSession session, final Map<String, String> properties ) {
+    get( Class<T> interfaceClass, final IPentahoSession session, final Map<String, String> properties ) {
     try {
       if ( !aggObjectFactory.objectDefined( interfaceClass ) ) {
         // this may not be a failure case, but we should log a warning in case the object is truly required
@@ -972,7 +1055,8 @@ public class PentahoSystem {
   }
 
   public static void shutdown() {
-    ServerStatusProvider.setServerStatus( IServerStatusProvider.ServerStatus.STOPPING );
+    serverStatusProvider.setStatus( IServerStatusProvider.ServerStatus.STOPPING );
+
     if ( LocaleHelper.getLocale() == null ) {
       LocaleHelper.setLocale( Locale.getDefault() );
     }
@@ -1003,7 +1087,8 @@ public class PentahoSystem {
     systemExitPoint();
     setApplicationContext( null );
     PentahoSystem.initializedStatus = PentahoSystem.SYSTEM_NOT_INITIALIZED;
-    ServerStatusProvider.setServerStatus( IServerStatusProvider.ServerStatus.DOWN );
+
+    serverStatusProvider.setStatus( IServerStatusProvider.ServerStatus.DOWN );
   }
 
   public static IApplicationContext getApplicationContext() {
@@ -1422,143 +1507,5 @@ public class PentahoSystem {
   public static <T> IPentahoObjectRegistration registerReference( IPentahoObjectReference<T> reference,
       Class<?>... classes ) {
     return PentahoSystem.runtimeObjectFactory.registerReference( reference, classes );
-  }
-
-  private static void doInit() {
-    ServerStatusProvider.setServerStatus( IServerStatusProvider.ServerStatus.STARTING );
-    ServerStatusProvider.setStatusMessages( new String[] { "Caution, the server is initializing. Do not shut down or restart the server at this time." } );
-    PeriodicStatusLogger.start();
-
-    // PDI-3438 Scheduled job fails to open a transformation
-    // Kettle jobs spawn threads which may require authentication to load transformations from
-    // the kettle repository, by using the INHERITABLETHREADLOCAL strategy, spawned threads will
-    // enjoy the same SecurityContext as their parent!
-    SecurityContextHolder.setStrategyName( securityContextHolderStrategy );
-
-    PentahoSystem.globalAttributes = Collections.synchronizedMap( new HashMap() );
-    PentahoSystem.globalParameters = new SimpleParameterProvider( PentahoSystem.globalAttributes );
-
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Setting property path" ); //$NON-NLS-1$
-    }
-    System.setProperty( "pentaho.solutionpath", "solution:" ); //$NON-NLS-1$
-    if ( LocaleHelper.getLocale() == null ) {
-      LocaleHelper.setLocale( Locale.getDefault() );
-    }
-
-    if ( PentahoSystem.systemSettingsService != null ) {
-      if ( debug ) {
-        Logger.debug( PentahoSystem.class, "Reading ACL list from pentaho.xml" ); //$NON-NLS-1$
-      }
-      // Set Up ACL File Extensions by reading pentaho.xml for acl-files
-      //
-      // Read the files that are permitted to have ACLs on them from
-      // the pentaho.xml.
-      //
-      String aclFiles = PentahoSystem.getSystemSetting( "acl-files", "xaction,url" ); //$NON-NLS-1$ //$NON-NLS-2$
-      StringTokenizer st = new StringTokenizer( aclFiles, "," ); //$NON-NLS-1$
-      String extn;
-      while ( st.hasMoreElements() ) {
-        extn = st.nextToken();
-        if ( !extn.startsWith( "." ) ) { //$NON-NLS-1$
-          extn = "." + extn; //$NON-NLS-1$
-        }
-        PentahoSystem.ACLFileExtensionList.add( extn );
-      }
-    }
-
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Set Java System Properties" ); //$NON-NLS-1$
-    }
-    PentahoSystem.setSystemProperties();
-
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Initialize XML Factories" ); //$NON-NLS-1$
-    }
-    PentahoSystem.initXMLFactories();
-
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Set Logging Level from pentaho.xml setting" ); //$NON-NLS-1$
-    }
-    PentahoSystem.loggingLevel = ILogger.ERROR;
-    if ( PentahoSystem.systemSettingsService != null ) {
-      PentahoSystem.loggingLevel =
-          Logger.getLogLevel( PentahoSystem.systemSettingsService.getSystemSetting( "log-level", "ERROR" ) ); //$NON-NLS-1$//$NON-NLS-2$
-    }
-
-    Logger.setLogLevel( PentahoSystem.loggingLevel );
-
-    // to guarantee hostnames in SSL mode are not being spoofed
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Register host name verifier" ); //$NON-NLS-1$
-    }
-    PentahoSystem.registerHostnameVerifier();
-
-    assert null != aggObjectFactory : "aggObjectFactory must be non-null"; //$NON-NLS-1$
-    try {
-      if ( debug ) {
-        Logger.debug( PentahoSystem.class, "Validating object factory" ); //$NON-NLS-1$
-      }
-      PentahoSystem.validateObjectFactory();
-    } catch ( PentahoSystemException e1 ) {
-      throw new RuntimeException( e1 ); // this is fatal
-    }
-
-    // store a list of the system listeners
-    try {
-      if ( debug ) {
-        Logger.debug( PentahoSystem.class, "Start System Listeners" ); //$NON-NLS-1$
-      }
-      PentahoSystem.notifySystemListenersOfStartup();
-    } catch ( PentahoSystemException e ) {
-      String msg = e.getLocalizedMessage();
-      Logger.error( PentahoSystem.class.getName(), msg, e );
-      PentahoSystem.initializedStatus |= PentahoSystem.SYSTEM_LISTENERS_FAILED;
-      PentahoSystem.addInitializationFailureMessage( PentahoSystem.SYSTEM_LISTENERS_FAILED, msg );
-
-      ServerStatusProvider.setServerStatus( IServerStatusProvider.ServerStatus.ERROR );
-    }
-
-    // once everything else is initialized, start global actions
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "Global startup" ); //$NON-NLS-1$
-    }
-    PentahoSystem.globalStartup();
-
-    if ( debug ) {
-      Logger.debug( PentahoSystem.class, "PentahoSystem Init Complete" ); //$NON-NLS-1$
-    }
-
-    //For now we'll stop the logger.  Might want to leave this running when we get more implemented.
-    if ( ServerStatusProvider.getInstance().getStatus() != IServerStatusProvider.ServerStatus.ERROR ) {
-      ServerStatusProvider.setServerStatus( IServerStatusProvider.ServerStatus.STARTED );
-    }
-    PeriodicStatusLogger.stop();
-
-    // call plugin listeners
-    IPluginManager pluginManager = PentahoSystem.get( IPluginManager.class );
-
-    IPentahoSession session = PentahoSessionHolder.getSession();
-    IPluginProvider pluginProvider = PentahoSystem.get( IPluginProvider.class, "IPluginProvider", session );
-    if ( pluginManager != null && pluginProvider != null ) {
-      try {
-        List<IPlatformPlugin> providedPlugins = pluginProvider.getPlugins( session );
-        for ( IPlatformPlugin plugin : providedPlugins ) {
-          try {
-            if ( !StringUtils.isEmpty( plugin.getLifecycleListenerClassname() ) ) {
-              ClassLoader loader = pluginManager.getClassLoader( plugin.getId() );
-              Object listener = loader.loadClass( plugin.getLifecycleListenerClassname() ).newInstance();
-              if ( IPlatformReadyListener.class.isAssignableFrom( listener.getClass() ) ) {
-                ( (IPlatformReadyListener) listener ).ready();
-              }
-            }
-          } catch ( Exception e ) {
-            Logger.warn( PentahoSystem.class, e.getMessage(), e );
-          }
-        }
-      } catch ( PlatformPluginRegistrationException e ) {
-        Logger.warn( PentahoSystem.class, e.getMessage(), e );
-      }
-    }
   }
 }

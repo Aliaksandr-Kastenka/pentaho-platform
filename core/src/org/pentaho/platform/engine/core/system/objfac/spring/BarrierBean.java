@@ -12,28 +12,33 @@
  * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  * See the GNU Lesser General Public License for more details.
  *
- * Copyright (c) 2002-2013 Pentaho Corporation..  All rights reserved.
+ * Copyright (c) 2002-2015 Pentaho Corporation..  All rights reserved.
  */
+package org.pentaho.platform.engine.core.system.objfac.spring;
 
-package org.pentaho.mantle.client.usersettings;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
-import com.google.gwt.core.client.JavaScriptObject;
-import com.google.gwt.core.client.JsArray;
+/**
+ * @author tkafalas
+ */
+public class BarrierBean {
+  private String beanName;
 
-public class JsSetting extends JavaScriptObject {
-
-  protected JsSetting() {
+  public BarrierBean( String beanName ) {
+    this.beanName = beanName;
   }
 
-  public final native String getName() /*-{ return this.name; }-*/; //
+  public String getBeanName() {
+    return beanName;
+  }
 
-  public final native String getValue() /*-{ return this.value; }-*/; //
-
-  public static final native JsArray<JsSetting> parseSettingsJson( String json )
-  /*-{
-    if(json == null || json === '') { return null; }
-    var obj = JSON.parse(json);
-    return obj != null ? obj.setting : obj;
-  }-*/;
-
+  public static List<BarrierBean> convertString( String barrierBeansString ) {
+    List<BarrierBean> barrierBeans = Collections.synchronizedList( new ArrayList<BarrierBean>() );
+    for ( String beanName : barrierBeansString.split( "," ) ) {
+      barrierBeans.add( new BarrierBean( beanName.trim() ) );
+    }
+    return barrierBeans;
+  }
 }
